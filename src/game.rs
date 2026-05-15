@@ -1,6 +1,7 @@
 use crate::position::Position;
 use crate::types::{
-    Color, Error, GameConfig, GameStatus, HistoryEntry, Piece, SenseResult, SensedSquare, Square,
+    Color, Error, GameConfig, GameStatus, HistoryEntry, Move, Piece, PieceKind, SenseResult,
+    SensedSquare, Square,
 };
 
 /// Reconnaissance Blind Chess game state.
@@ -130,6 +131,277 @@ impl Game {
     pub fn piece_at(&self, square: Square) -> Option<Piece> {
         self.position.piece_at(square)
     }
+
+    /// Returns move requests available from the acting player's information.
+    #[must_use]
+    pub fn move_actions(&self) -> Vec<Move> {
+        let Some(turn) = self.turn() else {
+            return Vec::new();
+        };
+
+        let mut moves = Vec::new();
+        for index in 0..64 {
+            let from = Square::from_index(index).expect("valid square");
+            let Some(piece) = self.piece_at(from) else {
+                continue;
+            };
+            if piece.color != turn {
+                continue;
+            }
+            self.add_piece_move_actions(from, piece, &mut moves);
+        }
+        moves.sort_by_key(move_sort_key);
+        moves.dedup();
+        moves
+    }
+
+    fn add_piece_move_actions(&self, from: Square, piece: Piece, moves: &mut Vec<Move>) {
+        match piece.kind {
+            PieceKind::Pawn => self.add_pawn_move_actions(from, piece.color, moves),
+            PieceKind::Knight => {
+                for (df, dr) in [
+                    (1, 2),
+                    (2, 1),
+                    (2, -1),
+                    (1, -2),
+                    (-1, -2),
+                    (-2, -1),
+                    (-2, 1),
+                    (-1, 2),
+                ] {
+                    self.add_step_move(from, piece.color, df, dr, moves);
+                }
+            }
+            PieceKind::Bishop => self.add_ray_move_actions(
+                from,
+                piece.color,
+                &[(1, 1), (1, -1), (-1, 1), (-1, -1)],
+                moves,
+            ),
+            PieceKind::Rook => self.add_ray_move_actions(
+                from,
+                piece.color,
+                &[(1, 0), (-1, 0), (0, 1), (0, -1)],
+                moves,
+            ),
+            PieceKind::Queen => self.add_ray_move_actions(
+                from,
+                piece.color,
+                &[
+                    (1, 0),
+                    (-1, 0),
+                    (0, 1),
+                    (0, -1),
+                    (1, 1),
+                    (1, -1),
+                    (-1, 1),
+                    (-1, -1),
+                ],
+                moves,
+            ),
+            PieceKind::King => {
+                for df in -1..=1 {
+                    for dr in -1..=1 {
+                        if df != 0 || dr != 0 {
+                            self.add_step_move(from, piece.color, df, dr, moves);
+                        }
+                    }
+                }
+                self.add_castling_move_actions(from, piece.color, moves);
+            }
+        }
+    }
+
+    fn add_pawn_move_actions(&self, from: Square, color: Color, moves: &mut Vec<Move>) {
+        let dir = pawn_dir(color);
+        let promotion_rank = pawn_promotion_rank(color);
+        if let Some(one_step) = offset(from, 0, dir) {
+            if !self.has_own_piece(one_step, color) {
+                add_promotion_moves(from, one_step, promotion_rank, moves);
+                if from.rank() == pawn_start_rank(color) {
+                    if let Some(two_step) = offset(one_step, 0, dir) {
+                        if !self.has_own_piece(two_step, color) {
+                            moves.push(Move {
+                                from,
+                                to: two_step,
+                                promotion: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for df in [-1, 1] {
+            if let Some(to) = offset(from, df, dir) {
+                if !self.has_own_piece(to, color) {
+                    add_promotion_moves(from, to, promotion_rank, moves);
+                }
+            }
+        }
+    }
+
+    fn add_step_move(&self, from: Square, color: Color, df: i8, dr: i8, moves: &mut Vec<Move>) {
+        if let Some(to) = offset(from, df, dr) {
+            if !self.has_own_piece(to, color) {
+                moves.push(Move {
+                    from,
+                    to,
+                    promotion: None,
+                });
+            }
+        }
+    }
+
+    fn add_ray_move_actions(
+        &self,
+        from: Square,
+        color: Color,
+        directions: &[(i8, i8)],
+        moves: &mut Vec<Move>,
+    ) {
+        for &(df, dr) in directions {
+            let mut current = from;
+            while let Some(to) = offset(current, df, dr) {
+                if self.has_own_piece(to, color) {
+                    break;
+                }
+                moves.push(Move {
+                    from,
+                    to,
+                    promotion: None,
+                });
+                current = to;
+            }
+        }
+    }
+
+    fn add_castling_move_actions(&self, from: Square, color: Color, moves: &mut Vec<Move>) {
+        let home_rank = home_rank(color);
+        if from != Square::from_coords(4, home_rank).expect("valid square") {
+            return;
+        }
+
+        let rights = self.position.castling_rights();
+        let (kingside, queenside) = match color {
+            Color::White => (rights.white_kingside, rights.white_queenside),
+            Color::Black => (rights.black_kingside, rights.black_queenside),
+        };
+        if kingside && self.castle_path_clear_of_own_pieces(color, 5..=6) {
+            moves.push(Move {
+                from,
+                to: Square::from_coords(6, home_rank).expect("valid square"),
+                promotion: None,
+            });
+        }
+        if queenside && self.castle_path_clear_of_own_pieces(color, 1..=3) {
+            moves.push(Move {
+                from,
+                to: Square::from_coords(2, home_rank).expect("valid square"),
+                promotion: None,
+            });
+        }
+    }
+
+    fn castle_path_clear_of_own_pieces(
+        &self,
+        color: Color,
+        mut files: std::ops::RangeInclusive<u8>,
+    ) -> bool {
+        let rank = home_rank(color);
+        files.all(|file| {
+            !self.has_own_piece(
+                Square::from_coords(file, rank).expect("valid square"),
+                color,
+            )
+        })
+    }
+
+    fn has_own_piece(&self, square: Square, color: Color) -> bool {
+        self.piece_at(square)
+            .map(|piece| piece.color == color)
+            .unwrap_or(false)
+    }
+}
+
+fn offset(square: Square, df: i8, dr: i8) -> Option<Square> {
+    let file = square.file() as i8 + df;
+    let rank = square.rank() as i8 + dr;
+    if (0..=7).contains(&file) && (0..=7).contains(&rank) {
+        Square::from_coords(file as u8, rank as u8)
+    } else {
+        None
+    }
+}
+
+fn pawn_dir(color: Color) -> i8 {
+    match color {
+        Color::White => 1,
+        Color::Black => -1,
+    }
+}
+
+fn pawn_start_rank(color: Color) -> u8 {
+    match color {
+        Color::White => 1,
+        Color::Black => 6,
+    }
+}
+
+fn pawn_promotion_rank(color: Color) -> u8 {
+    match color {
+        Color::White => 7,
+        Color::Black => 0,
+    }
+}
+
+fn home_rank(color: Color) -> u8 {
+    match color {
+        Color::White => 0,
+        Color::Black => 7,
+    }
+}
+
+fn add_promotion_moves(from: Square, to: Square, promotion_rank: u8, moves: &mut Vec<Move>) {
+    if to.rank() == promotion_rank {
+        for promotion in [
+            PieceKind::Queen,
+            PieceKind::Rook,
+            PieceKind::Bishop,
+            PieceKind::Knight,
+        ] {
+            moves.push(Move {
+                from,
+                to,
+                promotion: Some(promotion),
+            });
+        }
+    } else {
+        moves.push(Move {
+            from,
+            to,
+            promotion: None,
+        });
+    }
+}
+
+fn move_sort_key(mv: &Move) -> (u8, u8, u8) {
+    (
+        mv.from.index(),
+        mv.to.index(),
+        mv.promotion.map(piece_sort_key).unwrap_or(0),
+    )
+}
+
+fn piece_sort_key(piece: PieceKind) -> u8 {
+    match piece {
+        PieceKind::Queen => 1,
+        PieceKind::Rook => 2,
+        PieceKind::Bishop => 3,
+        PieceKind::Knight => 4,
+        PieceKind::King => 5,
+        PieceKind::Pawn => 6,
+    }
 }
 
 #[cfg(test)]
@@ -189,5 +461,53 @@ mod tests {
     fn pass_sense_returns_empty_result() {
         let game = Game::new(GameConfig::default());
         assert!(game.sense(None).squares.is_empty());
+    }
+
+    #[test]
+    fn starting_move_actions_include_pawn_capture_attempts() {
+        let game = Game::new(GameConfig::default());
+        let actions = game.move_actions();
+        assert!(actions.contains(&Move {
+            from: sq(0, 1),
+            to: sq(1, 2),
+            promotion: None,
+        }));
+        assert!(actions.contains(&Move {
+            from: sq(1, 1),
+            to: sq(0, 2),
+            promotion: None,
+        }));
+        assert!(actions.contains(&Move {
+            from: sq(1, 1),
+            to: sq(2, 2),
+            promotion: None,
+        }));
+    }
+
+    #[test]
+    fn pawn_forward_actions_ignore_unseen_opponent_piece() {
+        let game =
+            Game::from_fen("4k3/8/8/8/4p3/8/4P3/4K3 w - - 0 1", GameConfig::default()).unwrap();
+        assert!(game.move_actions().contains(&Move {
+            from: sq(4, 1),
+            to: sq(4, 2),
+            promotion: None,
+        }));
+        assert!(game.move_actions().contains(&Move {
+            from: sq(4, 1),
+            to: sq(4, 3),
+            promotion: None,
+        }));
+    }
+
+    #[test]
+    fn slider_actions_ignore_unseen_opponent_piece() {
+        let game =
+            Game::from_fen("4k3/8/8/3R1p2/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
+        assert!(game.move_actions().contains(&Move {
+            from: sq(3, 4),
+            to: sq(7, 4),
+            promotion: None,
+        }));
     }
 }

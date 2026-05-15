@@ -40,6 +40,10 @@ impl Position {
         self.turn
     }
 
+    pub(crate) fn castling_rights(&self) -> CastlingRights {
+        self.castling_rights
+    }
+
     pub(crate) fn to_fen(&self) -> String {
         let mut ranks = Vec::with_capacity(8);
         for rank in (0..8).rev() {
