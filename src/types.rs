@@ -19,6 +19,15 @@ impl Color {
             Self::Black => Self::White,
         }
     }
+
+    /// Returns a stable array index for the color.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::White => 0,
+            Self::Black => 1,
+        }
+    }
 }
 
 /// A board square, indexed from `a1 = 0` to `h8 = 63`.
