@@ -147,6 +147,10 @@ impl Position {
         self.occupied_by[color.index()]
     }
 
+    pub(crate) fn occupied(&self) -> u64 {
+        self.occupied
+    }
+
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
         self.en_passant = square;
     }
