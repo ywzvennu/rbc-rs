@@ -28,6 +28,34 @@ impl Color {
             Self::Black => 1,
         }
     }
+
+    pub(crate) const fn pawn_dir(self) -> i8 {
+        match self {
+            Self::White => 1,
+            Self::Black => -1,
+        }
+    }
+
+    pub(crate) const fn pawn_start_rank(self) -> u8 {
+        match self {
+            Self::White => 1,
+            Self::Black => 6,
+        }
+    }
+
+    pub(crate) const fn pawn_promotion_rank(self) -> u8 {
+        match self {
+            Self::White => 7,
+            Self::Black => 0,
+        }
+    }
+
+    pub(crate) const fn home_rank(self) -> u8 {
+        match self {
+            Self::White => 0,
+            Self::Black => 7,
+        }
+    }
 }
 
 /// A board square, indexed from `a1 = 0` to `h8 = 63`.
