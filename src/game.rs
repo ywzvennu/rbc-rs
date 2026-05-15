@@ -216,9 +216,7 @@ impl Game {
         let color = self.turn().ok_or(Error::GameOver)?;
         let fen_before_move = self.to_fen();
         let Some(requested_move) = requested else {
-            self.position.null_move();
-            self.update_status_after_turn();
-            self.pending_capture[color.opposite().index()] = None;
+            self.complete_turn_without_move(color);
             let outcome = MoveOutcome {
                 requested: None,
                 taken: None,
@@ -235,9 +233,7 @@ impl Game {
         }
 
         let Some(taken_move) = self.revise_move(requested_move) else {
-            self.position.null_move();
-            self.update_status_after_turn();
-            self.pending_capture[color.opposite().index()] = None;
+            self.complete_turn_without_move(color);
             let outcome = MoveOutcome {
                 requested,
                 taken: None,
@@ -715,6 +711,12 @@ impl Game {
 
     fn update_status_after_turn(&mut self) {
         self.status = self.status_after_non_winning_turn();
+    }
+
+    fn complete_turn_without_move(&mut self, color: Color) {
+        self.position.null_move();
+        self.update_status_after_turn();
+        self.pending_capture[color.opposite().index()] = None;
     }
 
     fn status_after_non_winning_turn(&self) -> GameStatus {
