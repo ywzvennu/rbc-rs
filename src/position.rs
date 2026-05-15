@@ -36,9 +36,14 @@ impl Position {
         self.squares[square.index() as usize]
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_piece(&mut self, square: Square, piece: Option<Piece>) {
         self.squares[square.index() as usize] = piece;
+    }
+
+    pub(crate) fn remove_piece(&mut self, square: Square) -> Option<Piece> {
+        let piece = self.piece_at(square);
+        self.set_piece(square, None);
+        piece
     }
 
     pub(crate) fn turn(&self) -> Color {
@@ -49,27 +54,14 @@ impl Position {
         self.castling_rights
     }
 
-    #[allow(dead_code)]
     pub(crate) fn en_passant(&self) -> Option<Square> {
         self.en_passant
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
         self.en_passant = square;
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn halfmove_clock(&self) -> u16 {
-        self.halfmove_clock
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn fullmove_number(&self) -> u16 {
-        self.fullmove_number
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn null_move(&mut self) {
         self.en_passant = None;
         self.halfmove_clock = self.halfmove_clock.saturating_add(1);
@@ -77,6 +69,47 @@ impl Position {
             self.fullmove_number = self.fullmove_number.saturating_add(1);
         }
         self.turn = self.turn.opposite();
+    }
+
+    pub(crate) fn finish_move(
+        &mut self,
+        moving_piece: Piece,
+        captured_piece: Option<Piece>,
+        en_passant: Option<Square>,
+    ) {
+        self.set_en_passant(en_passant);
+        self.halfmove_clock = if moving_piece.kind == PieceKind::Pawn || captured_piece.is_some() {
+            0
+        } else {
+            self.halfmove_clock.saturating_add(1)
+        };
+        if self.turn == Color::Black {
+            self.fullmove_number = self.fullmove_number.saturating_add(1);
+        }
+        self.turn = self.turn.opposite();
+    }
+
+    pub(crate) fn disable_castling_for_color(&mut self, color: Color) {
+        match color {
+            Color::White => {
+                self.castling_rights.white_kingside = false;
+                self.castling_rights.white_queenside = false;
+            }
+            Color::Black => {
+                self.castling_rights.black_kingside = false;
+                self.castling_rights.black_queenside = false;
+            }
+        }
+    }
+
+    pub(crate) fn disable_rook_castling_right(&mut self, color: Color, square: Square) {
+        match (color, square.file(), square.rank()) {
+            (Color::White, 0, 0) => self.castling_rights.white_queenside = false,
+            (Color::White, 7, 0) => self.castling_rights.white_kingside = false,
+            (Color::Black, 0, 7) => self.castling_rights.black_queenside = false,
+            (Color::Black, 7, 7) => self.castling_rights.black_kingside = false,
+            _ => {}
+        }
     }
 
     pub(crate) fn to_fen(&self) -> String {
@@ -249,8 +282,8 @@ mod tests {
         position.null_move();
         assert_eq!(position.turn(), Color::White);
         assert_eq!(position.en_passant(), None);
-        assert_eq!(position.halfmove_clock(), 1);
-        assert_eq!(position.fullmove_number(), 2);
+        assert_eq!(position.halfmove_clock, 1);
+        assert_eq!(position.fullmove_number, 2);
     }
 
     #[test]
