@@ -63,6 +63,20 @@ impl Square {
     pub const fn rank(self) -> u8 {
         self.0 / 8
     }
+
+    /// Returns the algebraic coordinate, such as `e4`.
+    #[must_use]
+    pub fn to_algebraic(self) -> String {
+        let file = char::from(b'a' + self.file());
+        let rank = char::from(b'1' + self.rank());
+        format!("{file}{rank}")
+    }
+}
+
+impl std::fmt::Display for Square {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_algebraic())
+    }
 }
 
 /// A chess piece kind.
