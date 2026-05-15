@@ -416,44 +416,31 @@ impl Game {
         if piece.color != turn {
             return false;
         }
+
+        // Pawn and king have promotion / castling rules that don't fit a
+        // pure bitboard membership check; dispatch to dedicated helpers.
         match piece.kind {
-            PieceKind::Pawn => self.is_pawn_move_action(mv, piece.color),
-            PieceKind::Knight => self.is_step_move_action(
-                mv,
-                piece.color,
-                &[
-                    (1, 2),
-                    (2, 1),
-                    (2, -1),
-                    (1, -2),
-                    (-1, -2),
-                    (-2, -1),
-                    (-2, 1),
-                    (-1, 2),
-                ],
-            ),
-            PieceKind::Bishop => {
-                self.is_ray_move_action(mv, piece.color, &[(1, 1), (1, -1), (-1, 1), (-1, -1)])
-            }
-            PieceKind::Rook => {
-                self.is_ray_move_action(mv, piece.color, &[(1, 0), (-1, 0), (0, 1), (0, -1)])
-            }
-            PieceKind::Queen => self.is_ray_move_action(
-                mv,
-                piece.color,
-                &[
-                    (1, 0),
-                    (-1, 0),
-                    (0, 1),
-                    (0, -1),
-                    (1, 1),
-                    (1, -1),
-                    (-1, 1),
-                    (-1, -1),
-                ],
-            ),
-            PieceKind::King => self.is_king_move_action(mv, piece.color),
+            PieceKind::Pawn => return self.is_pawn_move_action(mv, piece.color),
+            PieceKind::King => return self.is_king_move_action(mv, piece.color),
+            _ => {}
         }
+
+        if mv.promotion.is_some() {
+            return false;
+        }
+
+        let from_idx = mv.from.index();
+        let own = self.position.occupied_by(piece.color);
+        let attacks = match piece.kind {
+            PieceKind::Knight => crate::attack_tables::KNIGHT_ATTACKS[from_idx as usize] & !own,
+            PieceKind::Bishop => crate::attack_tables::bishop_attacks(from_idx, own),
+            PieceKind::Rook => crate::attack_tables::rook_attacks(from_idx, own),
+            PieceKind::Queen => crate::attack_tables::queen_attacks(from_idx, own),
+            PieceKind::Pawn | PieceKind::King => unreachable!("handled above"),
+        };
+
+        let to_bit = 1u64 << mv.to.index();
+        attacks & to_bit != 0
     }
 
     fn is_pawn_move_action(&self, mv: Move, color: Color) -> bool {
@@ -503,47 +490,6 @@ impl Game {
         }
     }
 
-    fn is_step_move_action(&self, mv: Move, color: Color, offsets: &[(i8, i8)]) -> bool {
-        if mv.promotion.is_some() {
-            return false;
-        }
-        let dx = mv.to.file() as i8 - mv.from.file() as i8;
-        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
-        if !offsets.iter().any(|&(df, dr)| df == dx && dr == dy) {
-            return false;
-        }
-        !self.has_own_piece(mv.to, color)
-    }
-
-    fn is_ray_move_action(&self, mv: Move, color: Color, directions: &[(i8, i8)]) -> bool {
-        if mv.promotion.is_some() {
-            return false;
-        }
-        if mv.from == mv.to {
-            return false;
-        }
-        let dx = mv.to.file() as i8 - mv.from.file() as i8;
-        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
-        let dfd = dx.signum();
-        let drd = dy.signum();
-        if !directions.contains(&(dfd, drd)) {
-            return false;
-        }
-        let mut current = mv.from;
-        loop {
-            let Some(next) = offset(current, dfd, drd) else {
-                return false;
-            };
-            if self.has_own_piece(next, color) {
-                return false;
-            }
-            if next == mv.to {
-                return true;
-            }
-            current = next;
-        }
-    }
-
     fn is_king_move_action(&self, mv: Move, color: Color) -> bool {
         if mv.promotion.is_some() {
             return false;
@@ -568,11 +514,11 @@ impl Game {
             };
         }
 
-        if dx.abs() <= 1 && dy.abs() <= 1 && (dx != 0 || dy != 0) {
-            !self.has_own_piece(mv.to, color)
-        } else {
-            false
-        }
+        let from_idx = mv.from.index() as usize;
+        let own = self.position.occupied_by(color);
+        let attacks = crate::attack_tables::KING_ATTACKS[from_idx] & !own;
+        let to_bit = 1u64 << mv.to.index();
+        attacks & to_bit != 0
     }
 
     fn castle_path_clear_of_own_pieces(
