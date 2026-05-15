@@ -372,7 +372,7 @@ impl Game {
         for df in [-1, 1] {
             if let Some(to) = offset(from, df, dir) {
                 if !self.has_own_piece(to, color) {
-                    add_promotion_moves(from, to, promotion_rank, moves);
+                    add_pawn_capture_moves(from, to, promotion_rank, moves);
                 }
             }
         }
@@ -812,6 +812,28 @@ fn add_promotion_moves(from: Square, to: Square, promotion_rank: u8, moves: &mut
     }
 }
 
+fn add_pawn_capture_moves(from: Square, to: Square, promotion_rank: u8, moves: &mut Vec<Move>) {
+    moves.push(Move {
+        from,
+        to,
+        promotion: None,
+    });
+    if to.rank() == promotion_rank {
+        for promotion in [
+            PieceKind::Queen,
+            PieceKind::Rook,
+            PieceKind::Bishop,
+            PieceKind::Knight,
+        ] {
+            moves.push(Move {
+                from,
+                to,
+                promotion: Some(promotion),
+            });
+        }
+    }
+}
+
 fn valid_promotion(mv: Move) -> Option<Move> {
     match mv.promotion {
         None | Some(PieceKind::Queen | PieceKind::Rook | PieceKind::Bishop | PieceKind::Knight) => {
@@ -1099,6 +1121,17 @@ mod tests {
                 kind: PieceKind::Queen,
             })
         );
+    }
+
+    #[test]
+    fn promotion_capture_actions_include_omitted_request() {
+        let game =
+            Game::from_fen("1r5k/P7/8/8/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
+        assert!(game.move_actions().contains(&Move {
+            from: sq(0, 6),
+            to: sq(1, 7),
+            promotion: None,
+        }));
     }
 
     #[test]

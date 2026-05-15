@@ -217,6 +217,17 @@ fn omitted_promotion_defaults_to_queen() {
 }
 
 #[test]
+fn omitted_promotion_capture_action_matches_upstream() {
+    let mut game =
+        Game::from_fen("1r5k/P7/8/8/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
+    assert!(game.move_actions().contains(&mv((0, 6), (1, 7))));
+
+    let outcome = game.apply_move(Some(mv((0, 6), (1, 7)))).unwrap();
+    assert_eq!(outcome.status, MoveStatus::Taken);
+    assert_eq!(outcome.taken.unwrap().promotion, Some(PieceKind::Queen));
+}
+
+#[test]
 fn invalid_requests_match_move_action_contract() {
     let mut game = Game::new(GameConfig::default());
     assert_eq!(
