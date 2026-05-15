@@ -302,57 +302,43 @@ impl Game {
     }
 
     fn add_piece_move_actions(&self, from: Square, piece: Piece, moves: &mut Vec<Move>) {
+        let own = self.position.occupied_by(piece.color);
         match piece.kind {
             PieceKind::Pawn => self.add_pawn_move_actions(from, piece.color, moves),
             PieceKind::Knight => {
-                for (df, dr) in [
-                    (1, 2),
-                    (2, 1),
-                    (2, -1),
-                    (1, -2),
-                    (-1, -2),
-                    (-2, -1),
-                    (-2, 1),
-                    (-1, 2),
-                ] {
-                    self.add_step_move(from, piece.color, df, dr, moves);
-                }
+                push_targets_from_bitboard(
+                    from,
+                    crate::attack_tables::KNIGHT_ATTACKS[from.index() as usize] & !own,
+                    moves,
+                );
             }
-            PieceKind::Bishop => self.add_ray_move_actions(
-                from,
-                piece.color,
-                &[(1, 1), (1, -1), (-1, 1), (-1, -1)],
-                moves,
-            ),
-            PieceKind::Rook => self.add_ray_move_actions(
-                from,
-                piece.color,
-                &[(1, 0), (-1, 0), (0, 1), (0, -1)],
-                moves,
-            ),
-            PieceKind::Queen => self.add_ray_move_actions(
-                from,
-                piece.color,
-                &[
-                    (1, 0),
-                    (-1, 0),
-                    (0, 1),
-                    (0, -1),
-                    (1, 1),
-                    (1, -1),
-                    (-1, 1),
-                    (-1, -1),
-                ],
-                moves,
-            ),
+            PieceKind::Bishop => {
+                push_targets_from_bitboard(
+                    from,
+                    crate::attack_tables::bishop_attacks(from.index(), own),
+                    moves,
+                );
+            }
+            PieceKind::Rook => {
+                push_targets_from_bitboard(
+                    from,
+                    crate::attack_tables::rook_attacks(from.index(), own),
+                    moves,
+                );
+            }
+            PieceKind::Queen => {
+                push_targets_from_bitboard(
+                    from,
+                    crate::attack_tables::queen_attacks(from.index(), own),
+                    moves,
+                );
+            }
             PieceKind::King => {
-                for df in -1..=1 {
-                    for dr in -1..=1 {
-                        if df != 0 || dr != 0 {
-                            self.add_step_move(from, piece.color, df, dr, moves);
-                        }
-                    }
-                }
+                push_targets_from_bitboard(
+                    from,
+                    crate::attack_tables::KING_ATTACKS[from.index() as usize] & !own,
+                    moves,
+                );
                 self.add_castling_move_actions(from, piece.color, moves);
             }
         }
@@ -361,64 +347,35 @@ impl Game {
     fn add_pawn_move_actions(&self, from: Square, color: Color, moves: &mut Vec<Move>) {
         let dir = color.pawn_dir();
         let promotion_rank = color.pawn_promotion_rank();
-        if let Some(one_step) = offset(from, 0, dir) {
-            if !self.has_own_piece(one_step, color) {
-                add_promotion_moves(from, one_step, promotion_rank, moves);
-                if from.rank() == color.pawn_start_rank() {
-                    if let Some(two_step) = offset(one_step, 0, dir) {
-                        if !self.has_own_piece(two_step, color) {
-                            moves.push(Move {
-                                from,
-                                to: two_step,
-                                promotion: None,
-                            });
-                        }
+        let own = self.position.occupied_by(color);
+        let from_idx = from.index() as usize;
+
+        // Forward push (single + optional double).
+        let push_bb = crate::attack_tables::PAWN_SINGLE_PUSH[color.index()][from_idx];
+        if push_bb != 0 && push_bb & own == 0 {
+            let one_step =
+                Square::from_index(push_bb.trailing_zeros() as u8).expect("valid square");
+            add_promotion_moves(from, one_step, promotion_rank, moves);
+            if from.rank() == color.pawn_start_rank() {
+                if let Some(two_step) = offset(one_step, 0, dir) {
+                    if !self.has_own_piece(two_step, color) {
+                        moves.push(Move {
+                            from,
+                            to: two_step,
+                            promotion: None,
+                        });
                     }
                 }
             }
         }
 
-        for df in [-1, 1] {
-            if let Some(to) = offset(from, df, dir) {
-                if !self.has_own_piece(to, color) {
-                    add_pawn_capture_moves(from, to, promotion_rank, moves);
-                }
-            }
-        }
-    }
-
-    fn add_step_move(&self, from: Square, color: Color, df: i8, dr: i8, moves: &mut Vec<Move>) {
-        if let Some(to) = offset(from, df, dr) {
-            if !self.has_own_piece(to, color) {
-                moves.push(Move {
-                    from,
-                    to,
-                    promotion: None,
-                });
-            }
-        }
-    }
-
-    fn add_ray_move_actions(
-        &self,
-        from: Square,
-        color: Color,
-        directions: &[(i8, i8)],
-        moves: &mut Vec<Move>,
-    ) {
-        for &(df, dr) in directions {
-            let mut current = from;
-            while let Some(to) = offset(current, df, dr) {
-                if self.has_own_piece(to, color) {
-                    break;
-                }
-                moves.push(Move {
-                    from,
-                    to,
-                    promotion: None,
-                });
-                current = to;
-            }
+        // Diagonal captures (blind — emitted whether or not opponent is there).
+        let mut captures = crate::attack_tables::PAWN_ATTACKS[color.index()][from_idx] & !own;
+        while captures != 0 {
+            let to_idx = captures.trailing_zeros() as u8;
+            captures &= captures - 1;
+            let to = Square::from_index(to_idx).expect("valid square");
+            add_pawn_capture_moves(from, to, promotion_rank, moves);
         }
     }
 
@@ -931,6 +888,18 @@ impl Game {
             move_outcome,
             fen_before_move,
             fen_after_move: self.to_fen(),
+        });
+    }
+}
+
+fn push_targets_from_bitboard(from: Square, mut bb: u64, moves: &mut Vec<Move>) {
+    while bb != 0 {
+        let to_idx = bb.trailing_zeros() as u8;
+        bb &= bb - 1;
+        moves.push(Move {
+            from,
+            to: Square::from_index(to_idx).expect("valid square"),
+            promotion: None,
         });
     }
 }
