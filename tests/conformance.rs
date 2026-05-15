@@ -63,6 +63,13 @@ fn move_actions_include_hidden_information_requests() {
     assert!(game.move_actions().contains(&mv((0, 1), (1, 2))));
     assert!(!game.move_actions().contains(&mv((4, 1), (4, 4))));
 
+    let black_to_move = Game::from_fen(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1",
+        GameConfig::default(),
+    )
+    .unwrap();
+    assert!(black_to_move.move_actions().contains(&mv((0, 6), (1, 5))));
+
     let rook_game =
         Game::from_fen("4k3/8/8/3R1p2/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
     assert!(rook_game.move_actions().contains(&mv((3, 4), (7, 4))));
@@ -92,6 +99,16 @@ fn sliders_revise_to_the_first_opponent_piece() {
 }
 
 #[test]
+fn pawn_double_step_revises_when_destination_is_occupied() {
+    let mut game =
+        Game::from_fen("4k3/8/8/8/3p4/8/3P4/4K3 w - - 0 1", GameConfig::default()).unwrap();
+    let outcome = game.apply_move(Some(mv((3, 1), (3, 3)))).unwrap();
+    assert_eq!(outcome.status, MoveStatus::Revised);
+    assert_eq!(outcome.taken, Some(mv((3, 1), (3, 2))));
+    assert_eq!(outcome.capture, None);
+}
+
+#[test]
 fn castling_ignores_check_but_honors_path_and_rights() {
     let mut into_check =
         Game::from_fen("4k3/8/8/8/6q1/8/8/4K2R w K - 0 1", GameConfig::default()).unwrap();
@@ -114,6 +131,57 @@ fn castling_ignores_check_but_honors_path_and_rights() {
         Game::from_fen("4k3/8/8/8/8/8/8/4K2R w - - 0 1", GameConfig::default()).unwrap();
     assert_eq!(
         no_rights.apply_move(Some(mv((4, 0), (6, 0)))),
+        Err(Error::InvalidMove)
+    );
+}
+
+#[test]
+fn castling_variants_match_upstream_behavior() {
+    let mut queenside =
+        Game::from_fen("4k3/8/8/8/8/8/8/R3K2R w Q - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        queenside
+            .apply_move(Some(mv((4, 0), (2, 0))))
+            .unwrap()
+            .status,
+        MoveStatus::Taken
+    );
+    assert_eq!(queenside.to_fen(), "4k3/8/8/8/8/8/8/2KR3R b - - 1 1");
+
+    let mut out_of_check =
+        Game::from_fen("4k3/8/8/8/8/8/8/q3K2R w K - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        out_of_check
+            .apply_move(Some(mv((4, 0), (6, 0))))
+            .unwrap()
+            .status,
+        MoveStatus::Taken
+    );
+
+    let mut stays_in_check =
+        Game::from_fen("4k3/8/8/8/8/6q1/8/4K2R w K - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        stays_in_check
+            .apply_move(Some(mv((4, 0), (6, 0))))
+            .unwrap()
+            .status,
+        MoveStatus::Taken
+    );
+
+    let mut queenside_blocked =
+        Game::from_fen("4k3/8/8/8/8/8/8/R1n1K3 w Q - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        queenside_blocked
+            .apply_move(Some(mv((4, 0), (2, 0))))
+            .unwrap()
+            .status,
+        MoveStatus::Illegal
+    );
+
+    let mut queenside_no_rights =
+        Game::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        queenside_no_rights.apply_move(Some(mv((4, 0), (2, 0)))),
         Err(Error::InvalidMove)
     );
 }
@@ -146,6 +214,32 @@ fn omitted_promotion_defaults_to_queen() {
             kind: PieceKind::Queen,
         })
     );
+}
+
+#[test]
+fn invalid_requests_match_move_action_contract() {
+    let mut game = Game::new(GameConfig::default());
+    assert_eq!(
+        game.apply_move(Some(mv((4, 6), (4, 4)))),
+        Err(Error::InvalidMove)
+    );
+    assert_eq!(
+        game.apply_move(Some(mv((4, 3), (4, 4)))),
+        Err(Error::InvalidMove)
+    );
+    assert_eq!(
+        game.apply_move(Some(mv((1, 0), (1, 2)))),
+        Err(Error::InvalidMove)
+    );
+}
+
+#[test]
+fn pass_moves_consume_turn_without_capture() {
+    let mut game = Game::new(GameConfig::default());
+    let outcome = game.apply_move(None).unwrap();
+    assert_eq!(outcome.status, MoveStatus::Pass);
+    assert_eq!(outcome.capture, None);
+    assert_eq!(game.turn(), Some(Color::Black));
 }
 
 #[test]
@@ -196,6 +290,34 @@ fn terminal_states_and_history_round_trip() {
         draw_game.status(),
         &GameStatus::Draw {
             reason: DrawReason::MoveLimit,
+        }
+    );
+}
+
+#[test]
+fn constructors_surface_upstream_terminal_conditions() {
+    let no_black_king =
+        Game::from_fen("8/8/8/8/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
+    assert_eq!(
+        no_black_king.status(),
+        &GameStatus::Won(GameResult {
+            winner: Color::White,
+            reason: WinReason::KingCapture,
+        })
+    );
+
+    let turn_limit = Game::from_fen(
+        "4k3/8/8/8/8/8/8/4K3 w - - 0 2",
+        GameConfig {
+            reversible_moves_limit: None,
+            full_turn_limit: Some(1),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        turn_limit.status(),
+        &GameStatus::Draw {
+            reason: DrawReason::TurnLimit,
         }
     );
 }
