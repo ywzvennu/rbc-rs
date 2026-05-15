@@ -10,7 +10,6 @@ keywords = ["chess", "reconchess", "rbc", "game"]
 categories = ["game-development"]
 
 [dependencies]
-cozy-chess = "0.3.4"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
