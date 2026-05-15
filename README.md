@@ -7,8 +7,8 @@ resolution, game results, and serializable history. It does not include bots,
 networking, matchmaking, accounts, clocks, or server code.
 
 The public API is Rust-native and crate-owned. The crate has no external
-dependency — board state, FEN parsing, move generation, and move resolution
-are all implemented in-tree.
+chess dependency — board state, FEN parsing, move generation, and move
+resolution are all implemented in-tree.
 
 ## Development
 
