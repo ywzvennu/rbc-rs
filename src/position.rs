@@ -36,12 +36,47 @@ impl Position {
         self.squares[square.index() as usize]
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn set_piece(&mut self, square: Square, piece: Option<Piece>) {
+        self.squares[square.index() as usize] = piece;
+    }
+
     pub(crate) fn turn(&self) -> Color {
         self.turn
     }
 
     pub(crate) fn castling_rights(&self) -> CastlingRights {
         self.castling_rights
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn en_passant(&self) -> Option<Square> {
+        self.en_passant
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
+        self.en_passant = square;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn halfmove_clock(&self) -> u16 {
+        self.halfmove_clock
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn fullmove_number(&self) -> u16 {
+        self.fullmove_number
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn null_move(&mut self) {
+        self.en_passant = None;
+        self.halfmove_clock = self.halfmove_clock.saturating_add(1);
+        if self.turn == Color::Black {
+            self.fullmove_number = self.fullmove_number.saturating_add(1);
+        }
+        self.turn = self.turn.opposite();
     }
 
     pub(crate) fn to_fen(&self) -> String {
@@ -209,15 +244,26 @@ mod tests {
     }
 
     #[test]
-    fn position_preserves_en_passant_from_fen() {
-        let position = Position::from_fen("4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1").unwrap();
-        assert_eq!(position.en_passant, Some(sq(4, 2)));
+    fn null_move_flips_turn_and_clears_en_passant() {
+        let mut position = Position::from_fen("4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1").unwrap();
+        position.null_move();
+        assert_eq!(position.turn(), Color::White);
+        assert_eq!(position.en_passant(), None);
+        assert_eq!(position.halfmove_clock(), 1);
+        assert_eq!(position.fullmove_number(), 2);
+    }
+
+    #[test]
+    fn en_passant_square_can_be_updated() {
+        let mut position = Position::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        position.set_en_passant(Some(sq(4, 2)));
+        assert_eq!(position.to_fen(), "4k3/8/8/8/8/8/8/4K3 w - e3 0 1");
     }
 
     #[test]
     fn position_can_render_after_king_capture() {
         let mut position = Position::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
-        position.squares[sq(4, 7).index() as usize] = None;
+        position.set_piece(sq(4, 7), None);
         assert_eq!(position.to_fen(), "8/8/8/8/8/8/8/4K3 w - - 0 1");
     }
 }
