@@ -43,6 +43,50 @@ fn opening_sequence() -> Vec<Move> {
     ]
 }
 
+/// Morphy vs Duke of Brunswick & Count Isouard, Paris 1858 — the "Opera
+/// Game". 33 plies; exercises pawn pushes/captures, knight moves,
+/// bishop trades, queen activity, castling (queenside), and a series of
+/// rook moves down an open file. A real chess game's worth of slider
+/// activity, enough total work for criterion to surface deltas under
+/// per-op noise.
+fn opera_game() -> Vec<Move> {
+    vec![
+        mv((4, 1), (4, 3)), // 1. e4
+        mv((4, 6), (4, 4)), // 1... e5
+        mv((6, 0), (5, 2)), // 2. Nf3
+        mv((3, 6), (3, 5)), // 2... d6
+        mv((3, 1), (3, 3)), // 3. d4
+        mv((2, 7), (6, 3)), // 3... Bg4
+        mv((3, 3), (4, 4)), // 4. dxe5
+        mv((6, 3), (5, 2)), // 4... Bxf3
+        mv((3, 0), (5, 2)), // 5. Qxf3
+        mv((3, 5), (4, 4)), // 5... dxe5
+        mv((5, 0), (2, 3)), // 6. Bc4
+        mv((6, 7), (5, 5)), // 6... Nf6
+        mv((5, 2), (1, 2)), // 7. Qb3
+        mv((3, 7), (4, 6)), // 7... Qe7
+        mv((1, 0), (2, 2)), // 8. Nc3
+        mv((2, 6), (2, 5)), // 8... c6
+        mv((2, 0), (6, 4)), // 9. Bg5
+        mv((1, 6), (1, 4)), // 9... b5
+        mv((2, 2), (1, 4)), // 10. Nxb5
+        mv((2, 5), (1, 4)), // 10... cxb5
+        mv((2, 3), (1, 4)), // 11. Bxb5+
+        mv((1, 7), (3, 6)), // 11... Nbd7
+        mv((4, 0), (2, 0)), // 12. O-O-O
+        mv((0, 7), (3, 7)), // 12... Rd8
+        mv((3, 0), (3, 6)), // 13. Rxd7
+        mv((3, 7), (3, 6)), // 13... Rxd7
+        mv((7, 0), (3, 0)), // 14. Rd1
+        mv((4, 6), (4, 5)), // 14... Qe6
+        mv((1, 4), (3, 6)), // 15. Bxd7+
+        mv((5, 5), (3, 6)), // 15... Nxd7
+        mv((1, 2), (1, 7)), // 16. Qb8+
+        mv((3, 6), (1, 7)), // 16... Nxb8
+        mv((3, 0), (3, 7)), // 17. Rd8#
+    ]
+}
+
 fn bench_move_actions_start(c: &mut Criterion) {
     let game = Game::new(GameConfig::default());
     c.bench_function("move_actions_start", |b| {
@@ -135,12 +179,30 @@ fn bench_apply_rook_clear(c: &mut Criterion) {
     });
 }
 
+fn bench_apply_opera_game(c: &mut Criterion) {
+    let initial = Game::new(GameConfig::default());
+    let moves = opera_game();
+    c.bench_function("apply_opera_game", |b| {
+        b.iter_batched(
+            || initial.clone(),
+            |mut game| {
+                for mv in &moves {
+                    let _ = game.apply_move(Some(*mv));
+                }
+                game
+            },
+            BatchSize::SmallInput,
+        )
+    });
+}
+
 criterion_group!(
     benches,
     bench_move_actions_start,
     bench_move_actions_midgame,
     bench_move_actions_slider_heavy,
     bench_apply_move_sequence,
+    bench_apply_opera_game,
     bench_apply_rook_revised,
     bench_apply_rook_clear,
     bench_sense_window,
