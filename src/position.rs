@@ -89,6 +89,16 @@ impl Position {
         self.fullmove_number
     }
 
+    pub(crate) fn has_king(&self, color: Color) -> bool {
+        self.squares.iter().any(|piece| {
+            *piece
+                == Some(Piece {
+                    color,
+                    kind: PieceKind::King,
+                })
+        })
+    }
+
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
         self.en_passant = square;
     }
