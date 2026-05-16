@@ -187,41 +187,66 @@ pub struct Move {
 /// Starting-position variant for the game.
 ///
 /// `Standard` (the default) preserves classical FIDE chess. The
-/// shuffle variants draw a back-rank arrangement from
-/// [`chess_startpos_rs`]:
+/// shuffle variants store the **already-sampled** back-rank
+/// arrangement:
 ///
-/// - `Mirrored` — both sides start with the same arrangement (FIDE
-///   convention; the rank-8 setup mirrors rank-1).
-/// - `Independent` — the two sides draw arrangements independently
-///   from the same [`chess_startpos_rs::Problem`]. RBC-flavoured;
+/// - `Rbc960` / `Rbc2880` / `RbcShuffle` — mirrored: both sides
+///   start with the same back-rank arrangement (FIDE convention).
+/// - `Rbc960Squared` / `Rbc2880Squared` / `RbcShuffleSquared` —
+///   white and black draw arrangements independently. RBC-flavoured;
 ///   removes the ability to infer the opponent's setup from your own.
+///
+/// Convenience constructors on [`Game`](crate::Game) handle sampling
+/// from [`chess_startpos_rs`] under the hood and produce these
+/// `Variant` values for you (see e.g. `Game::new_rbc_960`).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub enum Variant {
     /// Classical FIDE chess starting position. Default.
     #[default]
     Standard,
-    /// Both sides start with the same back-rank arrangement, drawn at
-    /// the given lexicographic index from `problem`.
-    Mirrored {
-        /// The constraint problem defining the starting-position
-        /// alphabet (typically one of the `chess_startpos_rs::chess`
-        /// presets).
-        problem: chess_startpos_rs::Problem<chess_startpos_rs::chess::Piece>,
-        /// Lexicographic index into the problem's solution set.
-        index: u64,
+
+    /// Chess960 — both sides use the given back rank. Bishops on
+    /// opposite-colour squares; king strictly between the rooks.
+    Rbc960 {
+        /// The 8-piece back-rank arrangement, file a..h.
+        backrank: [chess_startpos_rs::chess::Piece; 8],
     },
-    /// White and black draw their back-rank arrangements
-    /// independently from the same problem.
-    Independent {
-        /// The constraint problem defining the starting-position
-        /// alphabet.
-        problem: chess_startpos_rs::Problem<chess_startpos_rs::chess::Piece>,
-        /// Lexicographic index for white's rank-1 arrangement.
-        white_index: u64,
-        /// Lexicographic index for black's rank-8 arrangement.
-        black_index: u64,
+    /// Chess960² — white and black draw arrangements independently.
+    Rbc960Squared {
+        /// White's back rank (rank 1).
+        white: [chess_startpos_rs::chess::Piece; 8],
+        /// Black's back rank (rank 8).
+        black: [chess_startpos_rs::chess::Piece; 8],
+    },
+
+    /// Chess2880 — both sides use the given back rank. Bishops on
+    /// opposite-colour squares (no king-between-rooks constraint).
+    Rbc2880 {
+        /// The 8-piece back-rank arrangement.
+        backrank: [chess_startpos_rs::chess::Piece; 8],
+    },
+    /// Chess2880² — independent draws per side.
+    Rbc2880Squared {
+        /// White's back rank.
+        white: [chess_startpos_rs::chess::Piece; 8],
+        /// Black's back rank.
+        black: [chess_startpos_rs::chess::Piece; 8],
+    },
+
+    /// Unconstrained shuffle of the KQRRBBNN back rank (5040
+    /// positions). Both sides use the given back rank.
+    RbcShuffle {
+        /// The 8-piece back-rank arrangement.
+        backrank: [chess_startpos_rs::chess::Piece; 8],
+    },
+    /// Unconstrained shuffle, squared. Independent draws per side.
+    RbcShuffleSquared {
+        /// White's back rank.
+        white: [chess_startpos_rs::chess::Piece; 8],
+        /// Black's back rank.
+        black: [chess_startpos_rs::chess::Piece; 8],
     },
 }
 
@@ -259,12 +284,9 @@ impl Default for CastlingPolicy {
 ///
 /// Marked `#[non_exhaustive]` so future fields can be added without a
 /// semver break — construct via [`Default::default`] and spread or
-/// mutate as needed. Does not derive `Eq` / `PartialEq` because
-/// [`Variant`] embeds a [`chess_startpos_rs::Problem`] which does not
-/// (constraint-tree equality is not currently a defined operation
-/// upstream).
+/// mutate as needed.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct GameConfig {
     /// Maximum half-moves without a pawn move or capture before a draw.
