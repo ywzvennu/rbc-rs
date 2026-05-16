@@ -7,10 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New dependency on [`chess-startpos-rs`](https://crates.io/crates/chess-startpos-rs)
+  (`= "0.1"`). Provides the constraint engine that drives the shuffle
+  variants.
+- New `Variant` enum on `GameConfig`: `Standard` (default — classical
+  FIDE chess), `Mirrored { problem, index }` (both sides start with the
+  same back-rank arrangement drawn at the given index), `Independent {
+  problem, white_index, black_index }` (the two sides draw
+  independently — RBC-flavoured, removes inference of opponent's
+  setup from your own). `#[non_exhaustive]`.
+- New `CastlingPolicy` struct on `GameConfig`: per-side, per-direction
+  toggles applied as an intersection with the structural rights
+  derived from the chosen back rank. Defaults to all four directions
+  allowed.
+- `GameConfig` is now `#[non_exhaustive]` — construct via `Default`
+  and mutate, no struct-literal from external crates.
+- Re-exports: `Variant`, `CastlingPolicy`.
+
+### Changed
+
+- `GameConfig` no longer derives `Eq` / `PartialEq` because `Variant`
+  embeds a `chess_startpos_rs::Problem` which does not.
+
 ### Planned
 
-- `rbc960` game mode — Reconnaissance Blind Chess played from Chess960
-  (Fischer Random) starting positions.
+- Game::new wiring: assemble the starting FEN from `config.variant`.
+- X-FEN castling support so non-standard rook files survive FEN
+  round-trips.
+- Convenience constructors `Game::new_rbc_960` / `new_rbc_2880` /
+  `new_rbc_shuffle` and their mirrored / squared / `_random`
+  variants.
 - `rbc-setup` game mode — RBC played from user-configured starting
   positions, similar to setup chess on chess.com.
 

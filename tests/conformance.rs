@@ -290,14 +290,10 @@ fn terminal_states_and_history_round_trip() {
         assert_eq!(decoded.to_fen(), capture_game.to_fen());
     }
 
-    let mut draw_game = Game::from_fen(
-        "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
-        GameConfig {
-            reversible_moves_limit: Some(2),
-            full_turn_limit: None,
-        },
-    )
-    .unwrap();
+    let mut draw_config = GameConfig::default();
+    draw_config.reversible_moves_limit = Some(2);
+    draw_config.full_turn_limit = None;
+    let mut draw_game = Game::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1", draw_config).unwrap();
     draw_game.apply_move(None).unwrap();
     draw_game.apply_move(None).unwrap();
     assert_eq!(
@@ -320,14 +316,10 @@ fn constructors_surface_upstream_terminal_conditions() {
         })
     );
 
-    let turn_limit = Game::from_fen(
-        "4k3/8/8/8/8/8/8/4K3 w - - 0 2",
-        GameConfig {
-            reversible_moves_limit: None,
-            full_turn_limit: Some(1),
-        },
-    )
-    .unwrap();
+    let mut turn_limit_config = GameConfig::default();
+    turn_limit_config.reversible_moves_limit = None;
+    turn_limit_config.full_turn_limit = Some(1);
+    let turn_limit = Game::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 2", turn_limit_config).unwrap();
     assert_eq!(
         turn_limit.status(),
         &GameStatus::Draw {

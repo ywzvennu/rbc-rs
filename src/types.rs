@@ -184,14 +184,99 @@ pub struct Move {
     pub promotion: Option<PieceKind>,
 }
 
-/// Static game configuration.
+/// Starting-position variant for the game.
+///
+/// `Standard` (the default) preserves classical FIDE chess. The
+/// shuffle variants draw a back-rank arrangement from
+/// [`chess_startpos_rs`]:
+///
+/// - `Mirrored` — both sides start with the same arrangement (FIDE
+///   convention; the rank-8 setup mirrors rank-1).
+/// - `Independent` — the two sides draw arrangements independently
+///   from the same [`chess_startpos_rs::Problem`]. RBC-flavoured;
+///   removes the ability to infer the opponent's setup from your own.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub enum Variant {
+    /// Classical FIDE chess starting position. Default.
+    #[default]
+    Standard,
+    /// Both sides start with the same back-rank arrangement, drawn at
+    /// the given lexicographic index from `problem`.
+    Mirrored {
+        /// The constraint problem defining the starting-position
+        /// alphabet (typically one of the `chess_startpos_rs::chess`
+        /// presets).
+        problem: chess_startpos_rs::Problem<chess_startpos_rs::chess::Piece>,
+        /// Lexicographic index into the problem's solution set.
+        index: u64,
+    },
+    /// White and black draw their back-rank arrangements
+    /// independently from the same problem.
+    Independent {
+        /// The constraint problem defining the starting-position
+        /// alphabet.
+        problem: chess_startpos_rs::Problem<chess_startpos_rs::chess::Piece>,
+        /// Lexicographic index for white's rank-1 arrangement.
+        white_index: u64,
+        /// Lexicographic index for black's rank-8 arrangement.
+        black_index: u64,
+    },
+}
+
+/// Per-side, per-direction castling-right toggles.
+///
+/// Applied as an intersection with the structural castling rights
+/// derived from the chosen back-rank arrangement: a side that
+/// doesn't have a rook on the relevant flank cannot castle that way
+/// regardless of policy.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct CastlingPolicy {
+    /// White is allowed to castle kingside (h-side).
+    pub white_kingside: bool,
+    /// White is allowed to castle queenside (a-side).
+    pub white_queenside: bool,
+    /// Black is allowed to castle kingside (h-side).
+    pub black_kingside: bool,
+    /// Black is allowed to castle queenside (a-side).
+    pub black_queenside: bool,
+}
+
+impl Default for CastlingPolicy {
+    fn default() -> Self {
+        Self {
+            white_kingside: true,
+            white_queenside: true,
+            black_kingside: true,
+            black_queenside: true,
+        }
+    }
+}
+
+/// Static game configuration.
+///
+/// Marked `#[non_exhaustive]` so future fields can be added without a
+/// semver break — construct via [`Default::default`] and spread or
+/// mutate as needed. Does not derive `Eq` / `PartialEq` because
+/// [`Variant`] embeds a [`chess_startpos_rs::Problem`] which does not
+/// (constraint-tree equality is not currently a defined operation
+/// upstream).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct GameConfig {
     /// Maximum half-moves without a pawn move or capture before a draw.
     pub reversible_moves_limit: Option<u16>,
     /// Maximum full turns before a draw.
     pub full_turn_limit: Option<u16>,
+    /// Starting-position variant. Defaults to [`Variant::Standard`].
+    pub variant: Variant,
+    /// Per-side, per-direction castling-right toggles, intersected
+    /// with the structural rights derived from the chosen back rank.
+    /// Defaults to all four directions allowed.
+    pub castling_policy: CastlingPolicy,
 }
 
 impl Default for GameConfig {
@@ -199,6 +284,8 @@ impl Default for GameConfig {
         Self {
             reversible_moves_limit: Some(100),
             full_turn_limit: None,
+            variant: Variant::default(),
+            castling_policy: CastlingPolicy::default(),
         }
     }
 }

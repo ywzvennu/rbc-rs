@@ -70,8 +70,9 @@ mod game;
 
 pub use game::Game;
 pub use types::{
-    Capture, Color, DrawReason, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move,
-    MoveOutcome, MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, WinReason,
+    Capture, CastlingPolicy, Color, DrawReason, Error, GameConfig, GameResult, GameStatus,
+    HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseResult, SensedSquare,
+    Square, Variant, WinReason,
 };
 
 /// Crate version from Cargo metadata.
