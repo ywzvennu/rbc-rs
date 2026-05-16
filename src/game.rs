@@ -350,12 +350,12 @@ impl Game {
     }
 
     fn add_pawn_move_actions(&self, from: Square, color: Color, moves: &mut Vec<Move>) {
-        let dir = pawn_dir(color);
-        let promotion_rank = pawn_promotion_rank(color);
+        let dir = color.pawn_dir();
+        let promotion_rank = color.pawn_promotion_rank();
         if let Some(one_step) = offset(from, 0, dir) {
             if !self.has_own_piece(one_step, color) {
                 add_promotion_moves(from, one_step, promotion_rank, moves);
-                if from.rank() == pawn_start_rank(color) {
+                if from.rank() == color.pawn_start_rank() {
                     if let Some(two_step) = offset(one_step, 0, dir) {
                         if !self.has_own_piece(two_step, color) {
                             moves.push(Move {
@@ -414,7 +414,7 @@ impl Game {
     }
 
     fn add_castling_move_actions(&self, from: Square, color: Color, moves: &mut Vec<Move>) {
-        let home_rank = home_rank(color);
+        let home_rank = color.home_rank();
         if from != Square::from_coords(4, home_rank).expect("valid square") {
             return;
         }
@@ -445,7 +445,7 @@ impl Game {
         color: Color,
         mut files: std::ops::RangeInclusive<u8>,
     ) -> bool {
-        let rank = home_rank(color);
+        let rank = color.home_rank();
         files.all(|file| {
             !self.has_own_piece(
                 Square::from_coords(file, rank).expect("valid square"),
@@ -466,7 +466,7 @@ impl Game {
                 .piece_at(requested.from)
                 .map(|piece| {
                     piece.kind == PieceKind::Pawn
-                        && requested.to.rank() == pawn_promotion_rank(piece.color)
+                        && requested.to.rank() == piece.color.pawn_promotion_rank()
                 })
                 .unwrap_or(false)
         {
@@ -493,11 +493,11 @@ impl Game {
     fn revise_pawn_move(&self, mv: Move, color: Color) -> Option<Move> {
         let dx = mv.to.file() as i8 - mv.from.file() as i8;
         let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
-        let dir = pawn_dir(color);
+        let dir = color.pawn_dir();
         if dx == 0 && dy == dir && self.piece_at(mv.to).is_none() {
             return valid_promotion(mv);
         }
-        if dx == 0 && dy == 2 * dir && mv.from.rank() == pawn_start_rank(color) {
+        if dx == 0 && dy == 2 * dir && mv.from.rank() == color.pawn_start_rank() {
             let middle = offset(mv.from, 0, dir)?;
             if self.piece_at(middle).is_none() && self.piece_at(mv.to).is_none() {
                 return Some(mv);
@@ -570,7 +570,7 @@ impl Game {
     }
 
     fn revise_castling_move(&self, mv: Move, color: Color) -> Option<Move> {
-        let home_rank = home_rank(color);
+        let home_rank = color.home_rank();
         if mv.from != Square::from_coords(4, home_rank).expect("valid square") {
             return None;
         }
@@ -616,7 +616,7 @@ impl Game {
 
     fn capture_for_move(&self, mv: Move, moving_piece: Piece) -> Option<Capture> {
         if self.is_en_passant_capture(mv, moving_piece.color) {
-            let capture_square = offset(mv.to, 0, -pawn_dir(moving_piece.color))?;
+            let capture_square = offset(mv.to, 0, -moving_piece.color.pawn_dir())?;
             let piece = self.piece_at(capture_square)?;
             return Some(Capture {
                 square: capture_square,
@@ -641,7 +641,7 @@ impl Game {
         {
             return false;
         }
-        let Some(capture_square) = offset(mv.to, 0, -pawn_dir(color)) else {
+        let Some(capture_square) = offset(mv.to, 0, -color.pawn_dir()) else {
             return false;
         };
         self.piece_at(capture_square)
@@ -668,7 +668,7 @@ impl Game {
         self.position.set_piece(mv.to, Some(placed_piece));
 
         if is_castling_move(mv, moving_piece) {
-            let rank = home_rank(moving_piece.color);
+            let rank = moving_piece.color.home_rank();
             let (rook_from_file, rook_to_file) = if mv.to.file() == 6 { (7, 5) } else { (0, 3) };
             let rook_from = Square::from_coords(rook_from_file, rank).expect("valid square");
             let rook_to = Square::from_coords(rook_to_file, rank).expect("valid square");
@@ -688,7 +688,7 @@ impl Game {
             && mv.from.file() == mv.to.file()
             && mv.from.rank().abs_diff(mv.to.rank()) == 2
         {
-            offset(mv.from, 0, pawn_dir(moving_piece.color))
+            offset(mv.from, 0, moving_piece.color.pawn_dir())
         } else {
             None
         };
@@ -758,34 +758,6 @@ fn offset(square: Square, df: i8, dr: i8) -> Option<Square> {
         Square::from_coords(file as u8, rank as u8)
     } else {
         None
-    }
-}
-
-fn pawn_dir(color: Color) -> i8 {
-    match color {
-        Color::White => 1,
-        Color::Black => -1,
-    }
-}
-
-fn pawn_start_rank(color: Color) -> u8 {
-    match color {
-        Color::White => 1,
-        Color::Black => 6,
-    }
-}
-
-fn pawn_promotion_rank(color: Color) -> u8 {
-    match color {
-        Color::White => 7,
-        Color::Black => 0,
-    }
-}
-
-fn home_rank(color: Color) -> u8 {
-    match color {
-        Color::White => 0,
-        Color::Black => 7,
     }
 }
 
