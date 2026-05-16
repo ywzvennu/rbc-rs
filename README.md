@@ -1,5 +1,9 @@
 # rbc-rs
 
+[![CI](https://github.com/ywzvennu/rbc-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/ywzvennu/rbc-rs/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/badge/MSRV-1.80-blue.svg)](Cargo.toml)
+
 The Rust implementation of **Reconnaissance Blind Chess (RBC)** — a variant of
 chess in which each player can see only their own pieces and must spend one
 "sense" action per turn revealing a 3×3 window of the opponent's position
