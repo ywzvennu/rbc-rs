@@ -2,12 +2,32 @@ use crate::types::{Color, Error, Piece, PieceKind, Square};
 
 const STANDARD_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+/// Castling rights stored per side, per direction.
+///
+/// `Some(file)` records the file of the rook that would participate
+/// in this castling. `None` means the right is no longer available.
+///
+/// For standard chess the rook files are always 0 (queenside) and 7
+/// (kingside). For Chess960 / X-FEN positions the rook may start on
+/// any file flanking the king — the stored file lets move generation
+/// look up the right rook without re-scanning the board.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CastlingRights {
-    pub(crate) white_kingside: bool,
-    pub(crate) white_queenside: bool,
-    pub(crate) black_kingside: bool,
-    pub(crate) black_queenside: bool,
+    pub(crate) white_kingside: Option<u8>,
+    pub(crate) white_queenside: Option<u8>,
+    pub(crate) black_kingside: Option<u8>,
+    pub(crate) black_queenside: Option<u8>,
+}
+
+impl CastlingRights {
+    pub(crate) const fn none() -> Self {
+        Self {
+            white_kingside: None,
+            white_queenside: None,
+            black_kingside: None,
+            black_queenside: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -38,7 +58,7 @@ impl Position {
         let occupied_by = placement.occupied_by;
         let occupied = placement.occupied;
         let turn = parse_active_color(fields[1])?;
-        let castling_rights = parse_castling_rights(fields[2])?;
+        let castling_rights = parse_castling_rights(fields[2], &bitboards)?;
         let en_passant = parse_en_passant(fields[3])?;
         let halfmove_clock = fields[4]
             .parse()
@@ -185,23 +205,41 @@ impl Position {
     pub(crate) fn disable_castling_for_color(&mut self, color: Color) {
         match color {
             Color::White => {
-                self.castling_rights.white_kingside = false;
-                self.castling_rights.white_queenside = false;
+                self.castling_rights.white_kingside = None;
+                self.castling_rights.white_queenside = None;
             }
             Color::Black => {
-                self.castling_rights.black_kingside = false;
-                self.castling_rights.black_queenside = false;
+                self.castling_rights.black_kingside = None;
+                self.castling_rights.black_queenside = None;
             }
         }
     }
 
+    /// Called when a rook moves or is captured. Clears the castling
+    /// right whose rook starting file matches `square.file()` on
+    /// `color`'s home rank.
     pub(crate) fn disable_rook_castling_right(&mut self, color: Color, square: Square) {
-        match (color, square.file(), square.rank()) {
-            (Color::White, 0, 0) => self.castling_rights.white_queenside = false,
-            (Color::White, 7, 0) => self.castling_rights.white_kingside = false,
-            (Color::Black, 0, 7) => self.castling_rights.black_queenside = false,
-            (Color::Black, 7, 7) => self.castling_rights.black_kingside = false,
-            _ => {}
+        if square.rank() != color.home_rank() {
+            return;
+        }
+        let file = square.file();
+        match color {
+            Color::White => {
+                if self.castling_rights.white_kingside == Some(file) {
+                    self.castling_rights.white_kingside = None;
+                }
+                if self.castling_rights.white_queenside == Some(file) {
+                    self.castling_rights.white_queenside = None;
+                }
+            }
+            Color::Black => {
+                if self.castling_rights.black_kingside == Some(file) {
+                    self.castling_rights.black_kingside = None;
+                }
+                if self.castling_rights.black_queenside == Some(file) {
+                    self.castling_rights.black_queenside = None;
+                }
+            }
         }
     }
 
@@ -259,7 +297,7 @@ impl Position {
             "{} {} {} {} {} {}",
             ranks.join("/"),
             active_color,
-            self.castling_rights.to_fen(),
+            castling_rights_to_fen(self.castling_rights),
             en_passant,
             self.halfmove_clock,
             self.fullmove_number
@@ -267,26 +305,62 @@ impl Position {
     }
 }
 
-impl CastlingRights {
-    fn to_fen(self) -> String {
-        let mut result = String::new();
-        if self.white_kingside {
+/// Renders castling rights as a FEN field.
+///
+/// Emits the standard `KQkq` form when every available right's rook
+/// is on the conventional outer file (a / h on its side of the king).
+/// Otherwise emits the Shredder-FEN form using the rook file letter
+/// (uppercase for white, lowercase for black).
+fn castling_rights_to_fen(rights: CastlingRights) -> String {
+    let king_file = |bitboards: Option<u8>, _name: &str| -> Option<u8> { bitboards };
+    let _ = king_file;
+    let mut result = String::new();
+
+    // We need the king file to decide if a rook file is "conventional"
+    // (a-file/h-file relative to king). We don't have direct access
+    // here, so we use a simpler heuristic: standard FEN if and only
+    // if every rook file is 0 or 7.
+    let is_standard = [
+        rights.white_kingside,
+        rights.white_queenside,
+        rights.black_kingside,
+        rights.black_queenside,
+    ]
+    .iter()
+    .all(|r| matches!(r, None | Some(0) | Some(7)));
+
+    if is_standard {
+        if rights.white_kingside.is_some() {
             result.push('K');
         }
-        if self.white_queenside {
+        if rights.white_queenside.is_some() {
             result.push('Q');
         }
-        if self.black_kingside {
+        if rights.black_kingside.is_some() {
             result.push('k');
         }
-        if self.black_queenside {
+        if rights.black_queenside.is_some() {
             result.push('q');
         }
-        if result.is_empty() {
-            "-".to_string()
-        } else {
-            result
+    } else {
+        if let Some(f) = rights.white_kingside {
+            result.push((b'A' + f) as char);
         }
+        if let Some(f) = rights.white_queenside {
+            result.push((b'A' + f) as char);
+        }
+        if let Some(f) = rights.black_kingside {
+            result.push((b'a' + f) as char);
+        }
+        if let Some(f) = rights.black_queenside {
+            result.push((b'a' + f) as char);
+        }
+    }
+
+    if result.is_empty() {
+        "-".to_string()
+    } else {
+        result
     }
 }
 
@@ -387,34 +461,138 @@ fn parse_active_color(field: &str) -> Result<Color, Error> {
     }
 }
 
-fn parse_castling_rights(field: &str) -> Result<CastlingRights, Error> {
+/// Find the rook file for a single castling right on `color`'s home
+/// rank. `prefer_h_side` = `true` for kingside (look right of king),
+/// `false` for queenside (look left of king).
+fn find_rook_file(bitboards: &[[u64; 6]; 2], color: Color, prefer_h_side: bool) -> Option<u8> {
+    let home_rank = color.home_rank() as u32;
+    let king_file = {
+        let king_bb = bitboards[color.index()][PieceKind::King.index()];
+        // Find the king on its home rank.
+        let rank_mask = 0xffu64 << (home_rank * 8);
+        let king_on_home = king_bb & rank_mask;
+        if king_on_home == 0 {
+            return None;
+        }
+        (king_on_home.trailing_zeros() as u8) % 8
+    };
+    let rook_bb = bitboards[color.index()][PieceKind::Rook.index()];
+    let rank_mask = 0xffu64 << (home_rank * 8);
+    let rooks_on_home = rook_bb & rank_mask;
+
+    let mut candidates: Vec<u8> = Vec::new();
+    let mut bits = rooks_on_home;
+    while bits != 0 {
+        let idx = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
+        candidates.push(idx % 8);
+    }
+    if prefer_h_side {
+        // Nearest h-side rook = max file > king_file.
+        candidates.into_iter().filter(|&f| f > king_file).max()
+    } else {
+        // Nearest a-side rook = min file < king_file.
+        candidates.into_iter().filter(|&f| f < king_file).min()
+    }
+}
+
+/// Parse a castling-rights field. Supports both standard `KQkq` form
+/// (rook files inferred relative to the king) and Shredder-FEN form
+/// `AHah` (explicit rook file letters).
+fn parse_castling_rights(field: &str, bitboards: &[[u64; 6]; 2]) -> Result<CastlingRights, Error> {
     if field == "-" {
-        return Ok(CastlingRights {
-            white_kingside: false,
-            white_queenside: false,
-            black_kingside: false,
-            black_queenside: false,
-        });
+        return Ok(CastlingRights::none());
     }
 
-    let mut rights = CastlingRights {
-        white_kingside: false,
-        white_queenside: false,
-        black_kingside: false,
-        black_queenside: false,
-    };
+    let mut rights = CastlingRights::none();
     for symbol in field.chars() {
-        let right = match symbol {
-            'K' => &mut rights.white_kingside,
-            'Q' => &mut rights.white_queenside,
-            'k' => &mut rights.black_kingside,
-            'q' => &mut rights.black_queenside,
+        match symbol {
+            'K' => {
+                if rights.white_kingside.is_some() {
+                    return Err(invalid_fen("duplicate castling right"));
+                }
+                rights.white_kingside = Some(
+                    find_rook_file(bitboards, Color::White, true)
+                        .ok_or_else(|| invalid_fen("no kingside rook for white"))?,
+                );
+            }
+            'Q' => {
+                if rights.white_queenside.is_some() {
+                    return Err(invalid_fen("duplicate castling right"));
+                }
+                rights.white_queenside = Some(
+                    find_rook_file(bitboards, Color::White, false)
+                        .ok_or_else(|| invalid_fen("no queenside rook for white"))?,
+                );
+            }
+            'k' => {
+                if rights.black_kingside.is_some() {
+                    return Err(invalid_fen("duplicate castling right"));
+                }
+                rights.black_kingside = Some(
+                    find_rook_file(bitboards, Color::Black, true)
+                        .ok_or_else(|| invalid_fen("no kingside rook for black"))?,
+                );
+            }
+            'q' => {
+                if rights.black_queenside.is_some() {
+                    return Err(invalid_fen("duplicate castling right"));
+                }
+                rights.black_queenside = Some(
+                    find_rook_file(bitboards, Color::Black, false)
+                        .ok_or_else(|| invalid_fen("no queenside rook for black"))?,
+                );
+            }
+            // Shredder form: explicit rook file. Determine kingside /
+            // queenside by comparing to the king's file.
+            'A'..='H' | 'a'..='h' => {
+                let (color, file) = if symbol.is_ascii_uppercase() {
+                    (Color::White, symbol as u8 - b'A')
+                } else {
+                    (Color::Black, symbol as u8 - b'a')
+                };
+                let home_rank = color.home_rank() as u32;
+                let king_bb = bitboards[color.index()][PieceKind::King.index()];
+                let rank_mask = 0xffu64 << (home_rank * 8);
+                let king_on_home = king_bb & rank_mask;
+                if king_on_home == 0 {
+                    return Err(invalid_fen(
+                        "Shredder castling field without king on home rank",
+                    ));
+                }
+                let king_file = (king_on_home.trailing_zeros() as u8) % 8;
+                if file > king_file {
+                    if (match color {
+                        Color::White => rights.white_kingside,
+                        Color::Black => rights.black_kingside,
+                    })
+                    .is_some()
+                    {
+                        return Err(invalid_fen("duplicate castling right"));
+                    }
+                    match color {
+                        Color::White => rights.white_kingside = Some(file),
+                        Color::Black => rights.black_kingside = Some(file),
+                    }
+                } else if file < king_file {
+                    if (match color {
+                        Color::White => rights.white_queenside,
+                        Color::Black => rights.black_queenside,
+                    })
+                    .is_some()
+                    {
+                        return Err(invalid_fen("duplicate castling right"));
+                    }
+                    match color {
+                        Color::White => rights.white_queenside = Some(file),
+                        Color::Black => rights.black_queenside = Some(file),
+                    }
+                } else {
+                    return Err(invalid_fen("castling rook file equals king file"));
+                }
+            }
             _ => return Err(invalid_fen("invalid castling rights")),
-        };
-        if *right {
-            return Err(invalid_fen("duplicate castling right"));
         }
-        *right = true;
     }
     Ok(rights)
 }
@@ -501,5 +679,45 @@ mod tests {
             Position::from_fen("8/8/8/8/8/8/8/8 x - - 0 1").unwrap_err(),
             invalid_fen("invalid active color")
         );
+    }
+
+    #[test]
+    fn standard_castling_field_round_trips() {
+        let position =
+            Position::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
+        let rights = position.castling_rights();
+        assert_eq!(rights.white_kingside, Some(7));
+        assert_eq!(rights.white_queenside, Some(0));
+        assert_eq!(rights.black_kingside, Some(7));
+        assert_eq!(rights.black_queenside, Some(0));
+        assert_eq!(
+            position.to_fen(),
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        );
+    }
+
+    #[test]
+    fn shredder_castling_field_parses_and_round_trips() {
+        // Non-standard position: king on c1 (file 2), rooks on b1
+        // (file 1) and h1 (file 7). Shredder field: HBhb.
+        let fen = "nrkbnbqr/pppppppp/8/8/8/8/PPPPPPPP/NRKBNBQR w HBhb - 0 1";
+        let position = Position::from_fen(fen).unwrap();
+        let rights = position.castling_rights();
+        assert_eq!(rights.white_kingside, Some(7));
+        assert_eq!(rights.white_queenside, Some(1));
+        assert_eq!(rights.black_kingside, Some(7));
+        assert_eq!(rights.black_queenside, Some(1));
+        // Emits Shredder form because queenside rook is on file 1.
+        assert!(position.to_fen().contains(" HBhb "));
+    }
+
+    #[test]
+    fn castling_dash_means_no_rights() {
+        let position = Position::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let rights = position.castling_rights();
+        assert_eq!(rights.white_kingside, None);
+        assert_eq!(rights.white_queenside, None);
+        assert_eq!(rights.black_kingside, None);
+        assert_eq!(rights.black_queenside, None);
     }
 }

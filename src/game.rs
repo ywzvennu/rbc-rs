@@ -390,23 +390,28 @@ impl Game {
         }
 
         let rights = self.position.castling_rights();
-        let (kingside, queenside) = match color {
+        let (kingside_rook, queenside_rook) = match color {
             Color::White => (rights.white_kingside, rights.white_queenside),
             Color::Black => (rights.black_kingside, rights.black_queenside),
         };
-        if kingside && self.castle_path_clear_of_own_pieces(color, 5..=6) {
-            moves.push(Move {
-                from,
-                to: Square::from_coords(6, home_rank).expect("valid square"),
-                promotion: None,
-            });
+        let king_file = from.file();
+        if let Some(rook_file) = kingside_rook {
+            if self.chess960_castle_path_clear(color, king_file, rook_file, true, false) {
+                moves.push(Move {
+                    from,
+                    to: Square::from_coords(6, home_rank).expect("valid square"),
+                    promotion: None,
+                });
+            }
         }
-        if queenside && self.castle_path_clear_of_own_pieces(color, 1..=3) {
-            moves.push(Move {
-                from,
-                to: Square::from_coords(2, home_rank).expect("valid square"),
-                promotion: None,
-            });
+        if let Some(rook_file) = queenside_rook {
+            if self.chess960_castle_path_clear(color, king_file, rook_file, false, false) {
+                moves.push(Move {
+                    from,
+                    to: Square::from_coords(2, home_rank).expect("valid square"),
+                    promotion: None,
+                });
+            }
         }
     }
 
@@ -507,14 +512,19 @@ impl Game {
                 return false;
             }
             let rights = self.position.castling_rights();
-            let (kingside, queenside) = match color {
+            let (kingside_rook, queenside_rook) = match color {
                 Color::White => (rights.white_kingside, rights.white_queenside),
                 Color::Black => (rights.black_kingside, rights.black_queenside),
             };
+            let king_file = mv.from.file();
             return if dx == 2 {
-                kingside && self.castle_path_clear_of_own_pieces(color, 5..=6)
+                kingside_rook.is_some_and(|r| {
+                    self.chess960_castle_path_clear(color, king_file, r, true, false)
+                })
             } else {
-                queenside && self.castle_path_clear_of_own_pieces(color, 1..=3)
+                queenside_rook.is_some_and(|r| {
+                    self.chess960_castle_path_clear(color, king_file, r, false, false)
+                })
             };
         }
 
@@ -523,20 +533,6 @@ impl Game {
         let attacks = crate::attack_tables::KING_ATTACKS[from_idx] & !own;
         let to_bit = 1u64 << mv.to.index();
         attacks & to_bit != 0
-    }
-
-    fn castle_path_clear_of_own_pieces(
-        &self,
-        color: Color,
-        mut files: std::ops::RangeInclusive<u8>,
-    ) -> bool {
-        let rank = color.home_rank();
-        files.all(|file| {
-            !self.has_own_piece(
-                Square::from_coords(file, rank).expect("valid square"),
-                color,
-            )
-        })
     }
 
     fn has_own_piece(&self, square: Square, color: Color) -> bool {
@@ -692,17 +688,13 @@ impl Game {
         }
 
         let rights = self.position.castling_rights();
-        let allowed = match (color, kingside) {
-            (Color::White, true) => rights.white_kingside,
-            (Color::White, false) => rights.white_queenside,
-            (Color::Black, true) => rights.black_kingside,
-            (Color::Black, false) => rights.black_queenside,
+        let rook_file = match (color, kingside) {
+            (Color::White, true) => rights.white_kingside?,
+            (Color::White, false) => rights.white_queenside?,
+            (Color::Black, true) => rights.black_kingside?,
+            (Color::Black, false) => rights.black_queenside?,
         };
-        if !allowed {
-            return None;
-        }
 
-        let rook_file = if kingside { 7 } else { 0 };
         let rook_square = Square::from_coords(rook_file, home_rank).expect("valid square");
         if self.piece_at(rook_square)
             != Some(Piece {
@@ -713,16 +705,62 @@ impl Game {
             return None;
         }
 
-        let between = if kingside { 5..=6 } else { 1..=3 };
-        for file in between {
-            if self
-                .piece_at(Square::from_coords(file, home_rank).expect("valid square"))
-                .is_some()
-            {
-                return None;
-            }
+        let king_file = mv.from.file();
+        if !self.chess960_castle_path_clear(color, king_file, rook_file, kingside, true) {
+            return None;
         }
         Some(mv)
+    }
+
+    /// Chess960-compatible path-clear check.
+    ///
+    /// Castling requires the squares traversed by both the king and
+    /// the castling rook (plus their destinations) to be empty
+    /// except for the two pieces themselves. Targets are file-fixed
+    /// by the Chess960 rule: king lands on file 2 (queenside) or
+    /// 6 (kingside); rook lands on file 3 or 5.
+    ///
+    /// `block_on_opponent_pieces` controls whether occupants of the
+    /// opposite colour count as blockers. Action enumeration
+    /// (`add_castling_move_actions`, `is_king_move_action`) passes
+    /// `false` so castling moves blocked by opponent pieces are
+    /// still surfaced — they end up `MoveStatus::Illegal` at apply
+    /// time, not `Error::InvalidMove`. The stricter
+    /// `revise_castling_move` path passes `true`.
+    fn chess960_castle_path_clear(
+        &self,
+        color: Color,
+        king_file: u8,
+        rook_file: u8,
+        kingside: bool,
+        block_on_opponent_pieces: bool,
+    ) -> bool {
+        let home_rank = color.home_rank();
+        let (king_dest, rook_dest) = if kingside { (6u8, 5u8) } else { (2u8, 3u8) };
+
+        let king_lo = king_file.min(king_dest);
+        let king_hi = king_file.max(king_dest);
+        let rook_lo = rook_file.min(rook_dest);
+        let rook_hi = rook_file.max(rook_dest);
+
+        let lo = king_lo.min(rook_lo);
+        let hi = king_hi.max(rook_hi);
+
+        for file in lo..=hi {
+            if file == king_file || file == rook_file {
+                continue;
+            }
+            let square = Square::from_coords(file, home_rank).expect("valid square");
+            match self.piece_at(square) {
+                None => continue,
+                Some(piece) => {
+                    if block_on_opponent_pieces || piece.color == color {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn capture_for_move(&self, mv: Move, moving_piece: Piece) -> Option<Capture> {
@@ -780,7 +818,19 @@ impl Game {
 
         if is_castling_move(mv, moving_piece) {
             let rank = moving_piece.color.home_rank();
-            let (rook_from_file, rook_to_file) = if mv.to.file() == 6 { (7, 5) } else { (0, 3) };
+            // Look up the rook's starting file from castling rights —
+            // it's stored explicitly to support Chess960 positions where
+            // rooks are not on a/h files.
+            let kingside = mv.to.file() == 6;
+            let rights = self.position.castling_rights();
+            let rook_from_file = match (moving_piece.color, kingside) {
+                (Color::White, true) => rights.white_kingside,
+                (Color::White, false) => rights.white_queenside,
+                (Color::Black, true) => rights.black_kingside,
+                (Color::Black, false) => rights.black_queenside,
+            }
+            .expect("castling validated; rook file present");
+            let rook_to_file = if kingside { 5 } else { 3 };
             let rook_from = Square::from_coords(rook_from_file, rank).expect("valid square");
             let rook_to = Square::from_coords(rook_to_file, rank).expect("valid square");
             let rook = self.position.remove_piece(rook_from);

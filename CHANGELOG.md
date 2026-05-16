@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `CastlingRights` (internal) now stores each direction's right as
+  `Option<u8>` — the rook's starting file — instead of a plain
+  `bool`. Standard-chess castling still works exactly as before
+  (rook files always 0 / 7); Chess960 / X-FEN positions with
+  non-standard rook files are now representable end-to-end.
+- FEN castling-field parser accepts both the standard `KQkq` form
+  (rook file inferred relative to the king) and the Shredder-FEN
+  form `AHah` (explicit rook file letters). FEN emitter uses the
+  standard form when every rook is on file 0 or 7, otherwise emits
+  the Shredder form.
+- Castling move generation and validation use Chess960 path-clear
+  semantics: every square between the king's start and target, and
+  between the rook's start and target, must be empty (except for
+  the king and rook themselves). Standard chess is the special case
+  where rook files are 0 / 7.
+
 ### Added
 
 - New dependency on [`chess-startpos-rs`](https://crates.io/crates/chess-startpos-rs)
