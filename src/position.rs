@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use cozy_chess::{Board, File, Rank};
 
 use crate::types::{Color, Error, Piece, PieceKind, Square};
@@ -28,8 +26,33 @@ impl Position {
     }
 
     pub(crate) fn from_fen(fen: &str) -> Result<Self, Error> {
-        let board = Board::from_str(fen).map_err(|err| Error::InvalidFen(err.to_string()))?;
-        Ok(Self::from_cozy_board(&board))
+        let fields: Vec<_> = fen.split_whitespace().collect();
+        if fields.len() != 6 {
+            return Err(invalid_fen("expected six FEN fields"));
+        }
+
+        let squares = parse_piece_placement(fields[0])?;
+        let turn = parse_active_color(fields[1])?;
+        let castling_rights = parse_castling_rights(fields[2])?;
+        let en_passant = parse_en_passant(fields[3])?;
+        let halfmove_clock = fields[4]
+            .parse()
+            .map_err(|_| invalid_fen("invalid halfmove clock"))?;
+        let fullmove_number = fields[5]
+            .parse()
+            .map_err(|_| invalid_fen("invalid fullmove number"))?;
+        if fullmove_number == 0 {
+            return Err(invalid_fen("fullmove number must be at least one"));
+        }
+
+        Ok(Self {
+            squares,
+            turn,
+            castling_rights,
+            en_passant,
+            halfmove_clock,
+            fullmove_number,
+        })
     }
 
     pub(crate) fn piece_at(&self, square: Square) -> Option<Piece> {
@@ -267,6 +290,119 @@ fn piece_to_fen(piece: Piece) -> char {
     }
 }
 
+fn parse_piece_placement(placement: &str) -> Result<[Option<Piece>; 64], Error> {
+    let ranks: Vec<_> = placement.split('/').collect();
+    if ranks.len() != 8 {
+        return Err(invalid_fen("expected eight ranks"));
+    }
+
+    let mut squares = [None; 64];
+    for (fen_rank, row) in ranks.into_iter().enumerate() {
+        let rank = 7 - fen_rank as u8;
+        let mut file = 0_u8;
+        for symbol in row.chars() {
+            if let Some(empty_count) = symbol.to_digit(10) {
+                if empty_count == 0 || empty_count > 8 {
+                    return Err(invalid_fen("invalid empty-square count"));
+                }
+                file = file
+                    .checked_add(empty_count as u8)
+                    .ok_or_else(|| invalid_fen("rank exceeds eight files"))?;
+                if file > 8 {
+                    return Err(invalid_fen("rank exceeds eight files"));
+                }
+                continue;
+            }
+
+            if file >= 8 {
+                return Err(invalid_fen("rank exceeds eight files"));
+            }
+            let square = Square::from_coords(file, rank).expect("validated square");
+            squares[square.index() as usize] = Some(parse_piece(symbol)?);
+            file += 1;
+        }
+
+        if file != 8 {
+            return Err(invalid_fen("rank does not contain eight files"));
+        }
+    }
+
+    Ok(squares)
+}
+
+fn parse_piece(symbol: char) -> Result<Piece, Error> {
+    let color = if symbol.is_ascii_uppercase() {
+        Color::White
+    } else {
+        Color::Black
+    };
+    let kind = match symbol.to_ascii_lowercase() {
+        'k' => PieceKind::King,
+        'q' => PieceKind::Queen,
+        'r' => PieceKind::Rook,
+        'b' => PieceKind::Bishop,
+        'n' => PieceKind::Knight,
+        'p' => PieceKind::Pawn,
+        _ => return Err(invalid_fen("invalid piece symbol")),
+    };
+    Ok(Piece { color, kind })
+}
+
+fn parse_active_color(field: &str) -> Result<Color, Error> {
+    match field {
+        "w" => Ok(Color::White),
+        "b" => Ok(Color::Black),
+        _ => Err(invalid_fen("invalid active color")),
+    }
+}
+
+fn parse_castling_rights(field: &str) -> Result<CastlingRights, Error> {
+    if field == "-" {
+        return Ok(CastlingRights {
+            white_kingside: false,
+            white_queenside: false,
+            black_kingside: false,
+            black_queenside: false,
+        });
+    }
+
+    let mut rights = CastlingRights {
+        white_kingside: false,
+        white_queenside: false,
+        black_kingside: false,
+        black_queenside: false,
+    };
+    for symbol in field.chars() {
+        let right = match symbol {
+            'K' => &mut rights.white_kingside,
+            'Q' => &mut rights.white_queenside,
+            'k' => &mut rights.black_kingside,
+            'q' => &mut rights.black_queenside,
+            _ => return Err(invalid_fen("invalid castling rights")),
+        };
+        if *right {
+            return Err(invalid_fen("duplicate castling right"));
+        }
+        *right = true;
+    }
+    Ok(rights)
+}
+
+fn parse_en_passant(field: &str) -> Result<Option<Square>, Error> {
+    if field == "-" {
+        return Ok(None);
+    }
+    let bytes = field.as_bytes();
+    if bytes.len() != 2 || !(b'a'..=b'h').contains(&bytes[0]) || !matches!(bytes[1], b'3' | b'6') {
+        return Err(invalid_fen("invalid en passant square"));
+    }
+    Ok(Square::from_coords(bytes[0] - b'a', bytes[1] - b'1'))
+}
+
+fn invalid_fen(message: &str) -> Error {
+    Error::InvalidFen(message.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +442,33 @@ mod tests {
         let mut position = Position::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
         position.set_piece(sq(4, 7), None);
         assert_eq!(position.to_fen(), "8/8/8/8/8/8/8/4K3 w - - 0 1");
+    }
+
+    #[test]
+    fn fen_parser_accepts_rbc_positions_with_king_in_check() {
+        let position = Position::from_fen("4k3/8/8/8/8/6q1/8/4K3 w - - 0 1").unwrap();
+        assert_eq!(position.to_fen(), "4k3/8/8/8/8/6q1/8/4K3 w - - 0 1");
+    }
+
+    #[test]
+    fn fen_parser_accepts_positions_after_king_capture() {
+        let position = Position::from_fen("8/8/8/8/8/8/8/4K3 b - - 0 1").unwrap();
+        assert_eq!(position.to_fen(), "8/8/8/8/8/8/8/4K3 b - - 0 1");
+    }
+
+    #[test]
+    fn fen_parser_rejects_invalid_structure() {
+        assert_eq!(
+            Position::from_fen("8/8/8/8/8/8/8/8 w - - 0").unwrap_err(),
+            invalid_fen("expected six FEN fields")
+        );
+        assert_eq!(
+            Position::from_fen("8/8/8/8/8/8/8/7 w - - 0 1").unwrap_err(),
+            invalid_fen("rank does not contain eight files")
+        );
+        assert_eq!(
+            Position::from_fen("8/8/8/8/8/8/8/8 x - - 0 1").unwrap_err(),
+            invalid_fen("invalid active color")
+        );
     }
 }
