@@ -4,6 +4,20 @@ use std::hint::black_box;
 
 const MIDGAME_FEN: &str = "r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P4/2N1PN2/PPPBBPPP/R2Q1RK1 w - - 0 8";
 
+// Slider-heavy midgame: white queen, two rooks, bishop active on open files
+// and diagonals. Used to exercise slider move generation.
+const SLIDER_HEAVY_FEN: &str = "r3k2r/ppp2ppp/2n5/3qp3/3P4/2N2B2/PPP2PPP/R2Q1RK1 w kq - 0 10";
+
+// Rook on a1, white king on e2, opponent pawn on e1, opponent king on e8.
+// Apply Ra1->h1: the new revise_slider_move walks the ray (~7 squares) and
+// revises to e1 where the opponent pawn blocks.
+const ROOK_REVISE_FEN: &str = "4k3/8/8/8/8/8/4K3/R3p3 w - - 0 1";
+
+// Rook on a1, white king on e2, opponent king on e8, otherwise empty.
+// Apply Ra1->h1: full clear ray; both validation and revise walk to the
+// end without finding a blocker.
+const ROOK_CLEAR_FEN: &str = "4k3/8/8/8/8/8/4K3/R7 w - - 0 1";
+
 fn sq(file: u8, rank: u8) -> Square {
     Square::from_coords(file, rank).expect("valid square")
 }
@@ -84,11 +98,51 @@ fn bench_position_to_fen(c: &mut Criterion) {
     c.bench_function("position_to_fen", |b| b.iter(|| black_box(&game).to_fen()));
 }
 
+fn bench_move_actions_slider_heavy(c: &mut Criterion) {
+    let game = Game::from_fen(SLIDER_HEAVY_FEN, GameConfig::default()).expect("valid FEN");
+    c.bench_function("move_actions_slider_heavy", |b| {
+        b.iter(|| black_box(&game).move_actions())
+    });
+}
+
+fn bench_apply_rook_revised(c: &mut Criterion) {
+    let base = Game::from_fen(ROOK_REVISE_FEN, GameConfig::default()).expect("valid FEN");
+    let request = mv((0, 0), (7, 0));
+    c.bench_function("apply_rook_revised", |b| {
+        b.iter_batched(
+            || base.clone(),
+            |mut game| {
+                let _ = game.apply_move(Some(request));
+                game
+            },
+            BatchSize::SmallInput,
+        )
+    });
+}
+
+fn bench_apply_rook_clear(c: &mut Criterion) {
+    let base = Game::from_fen(ROOK_CLEAR_FEN, GameConfig::default()).expect("valid FEN");
+    let request = mv((0, 0), (7, 0));
+    c.bench_function("apply_rook_clear", |b| {
+        b.iter_batched(
+            || base.clone(),
+            |mut game| {
+                let _ = game.apply_move(Some(request));
+                game
+            },
+            BatchSize::SmallInput,
+        )
+    });
+}
+
 criterion_group!(
     benches,
     bench_move_actions_start,
     bench_move_actions_midgame,
+    bench_move_actions_slider_heavy,
     bench_apply_move_sequence,
+    bench_apply_rook_revised,
+    bench_apply_rook_clear,
     bench_sense_window,
     bench_position_from_fen,
     bench_position_to_fen,
