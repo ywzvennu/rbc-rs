@@ -17,9 +17,10 @@ exclude = [
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "chess-startpos-rs/serde"]
 
 [dependencies]
+chess-startpos-rs = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2"
 

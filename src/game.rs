@@ -1321,6 +1321,7 @@ mod tests {
             GameConfig {
                 reversible_moves_limit: Some(2),
                 full_turn_limit: None,
+                ..GameConfig::default()
             },
         )
         .unwrap();
@@ -1342,6 +1343,7 @@ mod tests {
             GameConfig {
                 reversible_moves_limit: None,
                 full_turn_limit: Some(1),
+                ..GameConfig::default()
             },
         )
         .unwrap();
@@ -1400,6 +1402,7 @@ mod tests {
         let move_limit = Game::new(GameConfig {
             reversible_moves_limit: Some(0),
             full_turn_limit: None,
+            ..GameConfig::default()
         });
         assert_eq!(
             move_limit.status(),
@@ -1413,6 +1416,7 @@ mod tests {
             GameConfig {
                 reversible_moves_limit: None,
                 full_turn_limit: Some(1),
+                ..GameConfig::default()
             },
         )
         .unwrap();
