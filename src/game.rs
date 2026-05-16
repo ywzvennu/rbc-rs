@@ -3,6 +3,7 @@ use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
     MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, WinReason,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Reconnaissance Blind Chess game state.
 #[derive(Clone, Debug)]
@@ -12,6 +13,52 @@ pub struct Game {
     status: GameStatus,
     history: Vec<HistoryEntry>,
     pending_capture: [Option<Square>; 2],
+    pending_sense: Option<SenseResult>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializedGame {
+    fen: String,
+    config: GameConfig,
+    status: GameStatus,
+    history: Vec<HistoryEntry>,
+    pending_capture: [Option<Square>; 2],
+    pending_sense: Option<SenseResult>,
+}
+
+impl Serialize for Game {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        SerializedGame {
+            fen: self.to_fen(),
+            config: self.config.clone(),
+            status: self.status.clone(),
+            history: self.history.clone(),
+            pending_capture: self.pending_capture,
+            pending_sense: self.pending_sense.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Game {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let serialized = SerializedGame::deserialize(deserializer)?;
+        let position = Position::from_fen(&serialized.fen).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            position,
+            config: serialized.config,
+            status: serialized.status,
+            history: serialized.history,
+            pending_capture: serialized.pending_capture,
+            pending_sense: serialized.pending_sense,
+        })
+    }
 }
 
 impl Game {
@@ -27,6 +74,7 @@ impl Game {
             config,
             history: Vec::new(),
             pending_capture: [None, None],
+            pending_sense: None,
         }
     }
 
@@ -41,6 +89,7 @@ impl Game {
             config,
             history: Vec::new(),
             pending_capture: [None, None],
+            pending_sense: None,
         })
     }
 
@@ -94,12 +143,14 @@ impl Game {
 
     /// Performs a sense action.
     #[must_use]
-    pub fn sense(&self, center: Option<Square>) -> SenseResult {
+    pub fn sense(&mut self, center: Option<Square>) -> SenseResult {
         let Some(center) = center else {
-            return SenseResult {
+            let result = SenseResult {
                 center: None,
                 squares: Vec::new(),
             };
+            self.pending_sense = Some(result.clone());
+            return result;
         };
 
         let mut squares = Vec::with_capacity(9);
@@ -120,10 +171,12 @@ impl Game {
             }
         }
 
-        SenseResult {
+        let result = SenseResult {
             center: Some(center),
             squares,
-        }
+        };
+        self.pending_sense = Some(result.clone());
+        result
     }
 
     /// Returns the piece at a square.
@@ -158,16 +211,19 @@ impl Game {
     /// Applies a requested move or pass.
     pub fn apply_move(&mut self, requested: Option<Move>) -> Result<MoveOutcome, Error> {
         let color = self.turn().ok_or(Error::GameOver)?;
+        let fen_before_move = self.to_fen();
         let Some(requested_move) = requested else {
             self.position.null_move();
             self.update_status_after_turn();
             self.pending_capture[color.opposite().index()] = None;
-            return Ok(MoveOutcome {
+            let outcome = MoveOutcome {
                 requested: None,
                 taken: None,
                 status: MoveStatus::Pass,
                 capture: None,
-            });
+            };
+            self.record_history(color, outcome.clone(), fen_before_move);
+            return Ok(outcome);
         };
 
         let requested_move = self.add_pawn_queen_promotion(requested_move);
@@ -179,12 +235,14 @@ impl Game {
             self.position.null_move();
             self.update_status_after_turn();
             self.pending_capture[color.opposite().index()] = None;
-            return Ok(MoveOutcome {
+            let outcome = MoveOutcome {
                 requested,
                 taken: None,
                 status: MoveStatus::Illegal,
                 capture: None,
-            });
+            };
+            self.record_history(color, outcome.clone(), fen_before_move);
+            return Ok(outcome);
         };
 
         let moving_piece = self
@@ -202,7 +260,7 @@ impl Game {
             self.status_after_non_winning_turn()
         };
 
-        Ok(MoveOutcome {
+        let outcome = MoveOutcome {
             requested,
             taken: Some(taken_move),
             status: if taken_move == requested_move {
@@ -211,7 +269,9 @@ impl Game {
                 MoveStatus::Revised
             },
             capture,
-        })
+        };
+        self.record_history(color, outcome.clone(), fen_before_move);
+        Ok(outcome)
     }
 
     /// Records a resignation by the given color.
@@ -679,6 +739,20 @@ impl Game {
             turn: self.position.turn(),
         }
     }
+
+    fn record_history(&mut self, color: Color, move_outcome: MoveOutcome, fen_before_move: String) {
+        let sense = self.pending_sense.take().unwrap_or(SenseResult {
+            center: None,
+            squares: Vec::new(),
+        });
+        self.history.push(HistoryEntry {
+            color,
+            sense,
+            move_outcome,
+            fen_before_move,
+            fen_after_move: self.to_fen(),
+        });
+    }
 }
 
 fn offset(square: Square, df: i8, dr: i8) -> Option<Square> {
@@ -820,7 +894,7 @@ mod tests {
 
     #[test]
     fn sense_center_returns_rank_descending_file_ascending_window() {
-        let game = Game::new(GameConfig::default());
+        let mut game = Game::new(GameConfig::default());
         let result = game.sense(Some(sq(1, 1)));
         let squares: Vec<Square> = result.squares.iter().map(|entry| entry.square).collect();
         assert_eq!(
@@ -841,7 +915,7 @@ mod tests {
 
     #[test]
     fn sense_corner_is_clipped() {
-        let game = Game::new(GameConfig::default());
+        let mut game = Game::new(GameConfig::default());
         let result = game.sense(Some(sq(0, 7)));
         let squares: Vec<Square> = result.squares.iter().map(|entry| entry.square).collect();
         assert_eq!(squares, vec![sq(0, 7), sq(1, 7), sq(0, 6), sq(1, 6)]);
@@ -849,7 +923,7 @@ mod tests {
 
     #[test]
     fn pass_sense_returns_empty_result() {
-        let game = Game::new(GameConfig::default());
+        let mut game = Game::new(GameConfig::default());
         assert!(game.sense(None).squares.is_empty());
     }
 
@@ -1153,5 +1227,52 @@ mod tests {
         game.resign(Color::White).unwrap();
         assert_eq!(game.apply_move(None), Err(Error::GameOver));
         assert_eq!(game.resign(Color::Black), Err(Error::GameOver));
+    }
+
+    #[test]
+    fn history_records_sense_and_move_outcome() {
+        let mut game = Game::new(GameConfig::default());
+        let sensed = game.sense(Some(sq(1, 1)));
+        let outcome = game
+            .apply_move(Some(Move {
+                from: sq(4, 1),
+                to: sq(4, 3),
+                promotion: None,
+            }))
+            .unwrap();
+        let entry = &game.history()[0];
+        assert_eq!(entry.color, Color::White);
+        assert_eq!(entry.sense, sensed);
+        assert_eq!(entry.move_outcome, outcome);
+        assert_eq!(
+            entry.fen_before_move,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        );
+        assert_eq!(
+            entry.fen_after_move,
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        );
+    }
+
+    #[test]
+    fn history_defaults_to_pass_sense_when_none_recorded() {
+        let mut game = Game::new(GameConfig::default());
+        game.apply_move(None).unwrap();
+        assert_eq!(game.history()[0].sense.center, None);
+        assert!(game.history()[0].sense.squares.is_empty());
+    }
+
+    #[test]
+    fn game_serializes_with_history() {
+        let mut game = Game::new(GameConfig::default());
+        let _ = game.sense(None);
+        game.apply_move(None).unwrap();
+        let json = serde_json::to_string(&game).unwrap();
+        let decoded: Game = serde_json::from_str(&json).unwrap();
+        assert!(json.contains("\"history\""));
+        assert!(json.contains("\"Pass\""));
+        assert_eq!(decoded.to_fen(), game.to_fen());
+        assert_eq!(decoded.status(), game.status());
+        assert_eq!(decoded.history(), game.history());
     }
 }
