@@ -281,11 +281,14 @@ fn terminal_states_and_history_round_trip() {
         })
     );
 
-    let json = serde_json::to_string(&capture_game).unwrap();
-    let decoded: Game = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded.status(), capture_game.status());
-    assert_eq!(decoded.history(), capture_game.history());
-    assert_eq!(decoded.to_fen(), capture_game.to_fen());
+    #[cfg(feature = "serde")]
+    {
+        let json = serde_json::to_string(&capture_game).unwrap();
+        let decoded: Game = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.status(), capture_game.status());
+        assert_eq!(decoded.history(), capture_game.history());
+        assert_eq!(decoded.to_fen(), capture_game.to_fen());
+    }
 
     let mut draw_game = Game::from_fen(
         "4k3/8/8/8/8/8/8/4K3 w - - 0 1",

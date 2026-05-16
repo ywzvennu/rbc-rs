@@ -2,6 +2,7 @@
 name = "rbc-rs"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 license = "MIT"
 description = "Reconnaissance Blind Chess game logic for Rust"
 repository = "https://github.com/ywzvennu/rbc-rs"
@@ -9,8 +10,12 @@ readme = "README.md"
 keywords = ["chess", "rbc", "reconchess", "game"]
 categories = ["game-development"]
 
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2"
 
 [dev-dependencies]

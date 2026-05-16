@@ -1,8 +1,10 @@
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Player color.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Color {
     /// White moves first.
     White,
@@ -59,7 +61,8 @@ impl Color {
 }
 
 /// A board square, indexed from `a1 = 0` to `h8 = 63`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Square(u8);
 
 impl Square {
@@ -117,7 +120,8 @@ impl std::fmt::Display for Square {
 }
 
 /// A chess piece kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum PieceKind {
     /// King.
     King,
@@ -159,7 +163,8 @@ impl PieceKind {
 }
 
 /// A colored chess piece.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Piece {
     /// Piece color.
     pub color: Color,
@@ -168,7 +173,8 @@ pub struct Piece {
 }
 
 /// A chess move request.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Move {
     /// Origin square.
     pub from: Square,
@@ -179,7 +185,8 @@ pub struct Move {
 }
 
 /// Static game configuration.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GameConfig {
     /// Maximum half-moves without a pawn move or capture before a draw.
     pub reversible_moves_limit: Option<u16>,
@@ -197,7 +204,8 @@ impl Default for GameConfig {
 }
 
 /// A sensed square and its current piece, if any.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SensedSquare {
     /// Square included in the sense result.
     pub square: Square,
@@ -206,7 +214,8 @@ pub struct SensedSquare {
 }
 
 /// Result of a sense action.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SenseResult {
     /// Requested center square. `None` represents a pass sense.
     pub center: Option<Square>,
@@ -215,7 +224,8 @@ pub struct SenseResult {
 }
 
 /// Information about a capture.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Capture {
     /// Captured square.
     pub square: Square,
@@ -224,7 +234,8 @@ pub struct Capture {
 }
 
 /// Move execution status.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum MoveStatus {
     /// The requested move was taken unchanged.
     Taken,
@@ -237,7 +248,8 @@ pub enum MoveStatus {
 }
 
 /// Result of a move action.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MoveOutcome {
     /// Requested move, if any.
     pub requested: Option<Move>,
@@ -250,7 +262,8 @@ pub struct MoveOutcome {
 }
 
 /// Game status.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GameStatus {
     /// Game is still running.
     Ongoing { turn: Color },
@@ -261,7 +274,8 @@ pub enum GameStatus {
 }
 
 /// Winning result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GameResult {
     /// Winning color.
     pub winner: Color,
@@ -270,7 +284,8 @@ pub struct GameResult {
 }
 
 /// Win reason.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum WinReason {
     /// Opponent king was captured.
     KingCapture,
@@ -281,7 +296,8 @@ pub enum WinReason {
 }
 
 /// Draw reason.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum DrawReason {
     /// Reversible move limit was reached.
     MoveLimit,
@@ -290,7 +306,8 @@ pub enum DrawReason {
 }
 
 /// History entry for a completed player turn.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HistoryEntry {
     /// Acting color.
     pub color: Color,
