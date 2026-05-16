@@ -675,20 +675,46 @@ impl Game {
 
     fn revise_slider_move(&self, mv: Move, piece: Piece) -> Option<Move> {
         let (df, dr) = slider_direction(mv, piece.kind)?;
-        let mut current = mv.from;
-        while let Some(next) = offset(current, df, dr) {
-            if let Some(blocker) = self.piece_at(next) {
-                if blocker.color == piece.color {
-                    return None;
-                }
-                return Some(Move { to: next, ..mv });
-            }
-            if next == mv.to {
-                return Some(mv);
-            }
-            current = next;
+        let dir_idx = crate::attack_tables::direction_index(df, dr)?;
+        let from_idx = mv.from.index() as usize;
+        let to_idx = mv.to.index() as usize;
+        let to_bit = 1u64 << to_idx;
+
+        let ray = crate::attack_tables::RAY_FROM[dir_idx][from_idx];
+        if ray & to_bit == 0 {
+            return None;
         }
-        None
+
+        let occupied = self.position.occupied();
+        let blockers = ray & occupied;
+        if blockers == 0 {
+            return Some(mv);
+        }
+
+        let blocker_idx = crate::attack_tables::closest_blocker(blockers, dir_idx);
+        let beyond_blocker =
+            crate::attack_tables::RAY_FROM[dir_idx][blocker_idx] | (1u64 << blocker_idx);
+        let reachable = ray & !beyond_blocker;
+
+        if to_bit & reachable != 0 {
+            return Some(mv);
+        }
+
+        let blocker_sq = Square::from_index(blocker_idx as u8).expect("valid square");
+        let blocker_piece = self.piece_at(blocker_sq).expect("blocker bit was set");
+
+        if blocker_piece.color == piece.color {
+            return None;
+        }
+
+        if to_idx == blocker_idx {
+            Some(mv)
+        } else {
+            Some(Move {
+                to: blocker_sq,
+                ..mv
+            })
+        }
     }
 
     fn revise_king_move(&self, mv: Move, color: Color) -> Option<Move> {

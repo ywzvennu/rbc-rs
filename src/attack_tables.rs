@@ -162,6 +162,33 @@ const fn dir_is_positive(dir_idx: usize) -> bool {
     matches!(dir_idx, E | N | NE | NW)
 }
 
+/// Returns the bit index of the blocker closest to the ray source.
+/// Caller must ensure `blockers != 0`.
+#[inline]
+pub(crate) fn closest_blocker(blockers: u64, dir_idx: usize) -> usize {
+    if dir_is_positive(dir_idx) {
+        blockers.trailing_zeros() as usize
+    } else {
+        63 - (blockers.leading_zeros() as usize)
+    }
+}
+
+/// Converts a step direction `(df, dr)` into a direction index for
+/// `RAY_FROM` / `closest_blocker`. Returns `None` for `(0, 0)`.
+pub(crate) const fn direction_index(df: i8, dr: i8) -> Option<usize> {
+    match (df, dr) {
+        (1, 0) => Some(E),
+        (0, 1) => Some(N),
+        (1, 1) => Some(NE),
+        (-1, 1) => Some(NW),
+        (-1, 0) => Some(W),
+        (0, -1) => Some(S),
+        (1, -1) => Some(SE),
+        (-1, -1) => Some(SW),
+        _ => None,
+    }
+}
+
 #[inline]
 fn ray_attacks_one_dir(from_idx: usize, own: u64, dir_idx: usize) -> u64 {
     let ray = RAY_FROM[dir_idx][from_idx];
