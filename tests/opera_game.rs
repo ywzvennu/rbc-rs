@@ -1,4 +1,4 @@
-use reconchess_rs::{Game, GameConfig, Move, MoveStatus, Square};
+use rbc_rs::{Game, GameConfig, Move, MoveStatus, Square};
 
 fn sq(file: u8, rank: u8) -> Square {
     Square::from_coords(file, rank).expect("valid square")

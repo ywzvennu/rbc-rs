@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use reconchess_rs::{Game, GameConfig, Move, Square};
+use rbc_rs::{Game, GameConfig, Move, Square};
 use std::hint::black_box;
 
 const MIDGAME_FEN: &str = "r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P4/2N1PN2/PPPBBPPP/R2Q1RK1 w - - 0 8";

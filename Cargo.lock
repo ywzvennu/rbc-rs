@@ -234,7 +234,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reconchess-rs"
+name = "rbc-rs"
 version = "0.1.0"
 dependencies = [
  "criterion",

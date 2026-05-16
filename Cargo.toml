@@ -1,12 +1,12 @@
 [package]
-name = "reconchess-rs"
+name = "rbc-rs"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Reconnaissance Blind Chess game logic for Rust"
-repository = "https://github.com/ywzvennu/reconchess-rs"
+repository = "https://github.com/ywzvennu/rbc-rs"
 readme = "README.md"
-keywords = ["chess", "reconchess", "rbc", "game"]
+keywords = ["chess", "rbc", "reconchess", "game"]
 categories = ["game-development"]
 
 [dependencies]
