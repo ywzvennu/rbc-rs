@@ -1,6 +1,6 @@
-use cozy_chess::{Board, File, Rank};
-
 use crate::types::{Color, Error, Piece, PieceKind, Square};
+
+const STANDARD_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CastlingRights {
@@ -22,7 +22,7 @@ pub(crate) struct Position {
 
 impl Position {
     pub(crate) fn standard() -> Self {
-        Self::from_cozy_board(&Board::default())
+        Self::from_fen(STANDARD_FEN).expect("standard starting FEN is valid")
     }
 
     pub(crate) fn from_fen(fen: &str) -> Result<Self, Error> {
@@ -194,47 +194,6 @@ impl Position {
             self.fullmove_number
         )
     }
-
-    fn from_cozy_board(board: &Board) -> Self {
-        let mut squares = [None; 64];
-        for index in 0..64 {
-            let square = Square::from_index(index).expect("valid square");
-            let cozy_square = to_cozy_square(square);
-            let Some(kind) = board.piece_on(cozy_square).map(from_cozy_piece) else {
-                continue;
-            };
-            let color = board
-                .color_on(cozy_square)
-                .map(from_cozy_color)
-                .expect("piece has color");
-            squares[index as usize] = Some(Piece { color, kind });
-        }
-
-        let turn = from_cozy_color(board.side_to_move());
-        let white_rights = board.castle_rights(cozy_chess::Color::White);
-        let black_rights = board.castle_rights(cozy_chess::Color::Black);
-        let en_passant = board.en_passant().map(|file| {
-            let rank = match turn {
-                Color::White => 5,
-                Color::Black => 2,
-            };
-            Square::from_coords(file as u8, rank).expect("valid en passant square")
-        });
-
-        Self {
-            squares,
-            turn,
-            castling_rights: CastlingRights {
-                white_kingside: white_rights.short.is_some(),
-                white_queenside: white_rights.long.is_some(),
-                black_kingside: black_rights.short.is_some(),
-                black_queenside: black_rights.long.is_some(),
-            },
-            en_passant,
-            halfmove_clock: board.halfmove_clock().into(),
-            fullmove_number: board.fullmove_number(),
-        }
-    }
 }
 
 impl CastlingRights {
@@ -257,31 +216,6 @@ impl CastlingRights {
         } else {
             result
         }
-    }
-}
-
-fn to_cozy_square(square: Square) -> cozy_chess::Square {
-    cozy_chess::Square::new(
-        File::index(square.file() as usize),
-        Rank::index(square.rank() as usize),
-    )
-}
-
-fn from_cozy_color(color: cozy_chess::Color) -> Color {
-    match color {
-        cozy_chess::Color::White => Color::White,
-        cozy_chess::Color::Black => Color::Black,
-    }
-}
-
-fn from_cozy_piece(piece: cozy_chess::Piece) -> PieceKind {
-    match piece {
-        cozy_chess::Piece::King => PieceKind::King,
-        cozy_chess::Piece::Queen => PieceKind::Queen,
-        cozy_chess::Piece::Rook => PieceKind::Rook,
-        cozy_chess::Piece::Bishop => PieceKind::Bishop,
-        cozy_chess::Piece::Knight => PieceKind::Knight,
-        cozy_chess::Piece::Pawn => PieceKind::Pawn,
     }
 }
 
