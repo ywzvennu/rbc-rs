@@ -3,6 +3,8 @@
 //! This crate intentionally exposes crate-owned game types and keeps the
 //! underlying chess implementation as an internal detail.
 
+mod attack_tables;
+
 mod types;
 
 mod position;

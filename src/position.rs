@@ -143,6 +143,10 @@ impl Position {
         self.bitboards[color.index()][kind.index()]
     }
 
+    pub(crate) fn occupied_by(&self, color: Color) -> u64 {
+        self.occupied_by[color.index()]
+    }
+
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
         self.en_passant = square;
     }
