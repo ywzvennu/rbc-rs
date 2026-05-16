@@ -228,7 +228,7 @@ impl Game {
         };
 
         let requested_move = self.add_pawn_queen_promotion(requested_move);
-        if !self.move_actions().contains(&requested_move) {
+        if !self.is_move_action(requested_move) {
             return Err(Error::InvalidMove);
         }
 
@@ -440,6 +440,175 @@ impl Game {
                 to: Square::from_coords(2, home_rank).expect("valid square"),
                 promotion: None,
             });
+        }
+    }
+
+    fn is_move_action(&self, mv: Move) -> bool {
+        let Some(turn) = self.turn() else {
+            return false;
+        };
+        let Some(piece) = self.piece_at(mv.from) else {
+            return false;
+        };
+        if piece.color != turn {
+            return false;
+        }
+        match piece.kind {
+            PieceKind::Pawn => self.is_pawn_move_action(mv, piece.color),
+            PieceKind::Knight => self.is_step_move_action(
+                mv,
+                piece.color,
+                &[
+                    (1, 2),
+                    (2, 1),
+                    (2, -1),
+                    (1, -2),
+                    (-1, -2),
+                    (-2, -1),
+                    (-2, 1),
+                    (-1, 2),
+                ],
+            ),
+            PieceKind::Bishop => {
+                self.is_ray_move_action(mv, piece.color, &[(1, 1), (1, -1), (-1, 1), (-1, -1)])
+            }
+            PieceKind::Rook => {
+                self.is_ray_move_action(mv, piece.color, &[(1, 0), (-1, 0), (0, 1), (0, -1)])
+            }
+            PieceKind::Queen => self.is_ray_move_action(
+                mv,
+                piece.color,
+                &[
+                    (1, 0),
+                    (-1, 0),
+                    (0, 1),
+                    (0, -1),
+                    (1, 1),
+                    (1, -1),
+                    (-1, 1),
+                    (-1, -1),
+                ],
+            ),
+            PieceKind::King => self.is_king_move_action(mv, piece.color),
+        }
+    }
+
+    fn is_pawn_move_action(&self, mv: Move, color: Color) -> bool {
+        let dx = mv.to.file() as i8 - mv.from.file() as i8;
+        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
+        let dir = color.pawn_dir();
+        let promotion_rank = color.pawn_promotion_rank();
+
+        if dx == 0 && dy == dir {
+            if self.has_own_piece(mv.to, color) {
+                return false;
+            }
+            if mv.to.rank() == promotion_rank {
+                matches!(
+                    mv.promotion,
+                    Some(
+                        PieceKind::Queen | PieceKind::Rook | PieceKind::Bishop | PieceKind::Knight
+                    )
+                )
+            } else {
+                mv.promotion.is_none()
+            }
+        } else if dx == 0 && dy == 2 * dir && mv.from.rank() == color.pawn_start_rank() {
+            if mv.promotion.is_some() {
+                return false;
+            }
+            let Some(middle) = offset(mv.from, 0, dir) else {
+                return false;
+            };
+            !self.has_own_piece(middle, color) && !self.has_own_piece(mv.to, color)
+        } else if dx.abs() == 1 && dy == dir {
+            if self.has_own_piece(mv.to, color) {
+                return false;
+            }
+            if mv.to.rank() == promotion_rank {
+                matches!(
+                    mv.promotion,
+                    None | Some(
+                        PieceKind::Queen | PieceKind::Rook | PieceKind::Bishop | PieceKind::Knight
+                    )
+                )
+            } else {
+                mv.promotion.is_none()
+            }
+        } else {
+            false
+        }
+    }
+
+    fn is_step_move_action(&self, mv: Move, color: Color, offsets: &[(i8, i8)]) -> bool {
+        if mv.promotion.is_some() {
+            return false;
+        }
+        let dx = mv.to.file() as i8 - mv.from.file() as i8;
+        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
+        if !offsets.iter().any(|&(df, dr)| df == dx && dr == dy) {
+            return false;
+        }
+        !self.has_own_piece(mv.to, color)
+    }
+
+    fn is_ray_move_action(&self, mv: Move, color: Color, directions: &[(i8, i8)]) -> bool {
+        if mv.promotion.is_some() {
+            return false;
+        }
+        if mv.from == mv.to {
+            return false;
+        }
+        let dx = mv.to.file() as i8 - mv.from.file() as i8;
+        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
+        let dfd = dx.signum();
+        let drd = dy.signum();
+        if !directions.contains(&(dfd, drd)) {
+            return false;
+        }
+        let mut current = mv.from;
+        loop {
+            let Some(next) = offset(current, dfd, drd) else {
+                return false;
+            };
+            if self.has_own_piece(next, color) {
+                return false;
+            }
+            if next == mv.to {
+                return true;
+            }
+            current = next;
+        }
+    }
+
+    fn is_king_move_action(&self, mv: Move, color: Color) -> bool {
+        if mv.promotion.is_some() {
+            return false;
+        }
+        let dx = mv.to.file() as i8 - mv.from.file() as i8;
+        let dy = mv.to.rank() as i8 - mv.from.rank() as i8;
+
+        if dy == 0 && dx.abs() == 2 {
+            let home_rank = color.home_rank();
+            if mv.from != Square::from_coords(4, home_rank).expect("valid square") {
+                return false;
+            }
+            let rights = self.position.castling_rights();
+            let (kingside, queenside) = match color {
+                Color::White => (rights.white_kingside, rights.white_queenside),
+                Color::Black => (rights.black_kingside, rights.black_queenside),
+            };
+            return if dx == 2 {
+                kingside && self.castle_path_clear_of_own_pieces(color, 5..=6)
+            } else {
+                queenside && self.castle_path_clear_of_own_pieces(color, 1..=3)
+            };
+        }
+
+        if dx.abs() <= 1 && dy.abs() <= 1 && (dx != 0 || dy != 0) {
+            !self.has_own_piece(mv.to, color)
+        } else {
+            false
         }
     }
 
