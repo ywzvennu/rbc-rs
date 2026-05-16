@@ -67,9 +67,7 @@ impl Game {
     pub fn new(config: GameConfig) -> Self {
         let position = Position::standard();
         Self {
-            status: GameStatus::Ongoing {
-                turn: position.turn(),
-            },
+            status: initial_status(&position, &config),
             position,
             config,
             history: Vec::new(),
@@ -82,9 +80,7 @@ impl Game {
     pub fn from_fen(fen: &str, config: GameConfig) -> Result<Self, Error> {
         let position = Position::from_fen(fen)?;
         Ok(Self {
-            status: GameStatus::Ongoing {
-                turn: position.turn(),
-            },
+            status: initial_status(&position, &config),
             position,
             config,
             history: Vec::new(),
@@ -868,6 +864,42 @@ fn piece_sort_key(piece: PieceKind) -> u8 {
     }
 }
 
+fn initial_status(position: &Position, config: &GameConfig) -> GameStatus {
+    if !position.has_king(Color::White) {
+        return GameStatus::Won(GameResult {
+            winner: Color::Black,
+            reason: WinReason::KingCapture,
+        });
+    }
+    if !position.has_king(Color::Black) {
+        return GameStatus::Won(GameResult {
+            winner: Color::White,
+            reason: WinReason::KingCapture,
+        });
+    }
+    if config
+        .full_turn_limit
+        .map(|limit| position.fullmove_number() > limit)
+        .unwrap_or(false)
+    {
+        return GameStatus::Draw {
+            reason: crate::types::DrawReason::TurnLimit,
+        };
+    }
+    if config
+        .reversible_moves_limit
+        .map(|limit| position.halfmove_clock() >= limit)
+        .unwrap_or(false)
+    {
+        return GameStatus::Draw {
+            reason: crate::types::DrawReason::MoveLimit,
+        };
+    }
+    GameStatus::Ongoing {
+        turn: position.turn(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1227,6 +1259,45 @@ mod tests {
         game.resign(Color::White).unwrap();
         assert_eq!(game.apply_move(None), Err(Error::GameOver));
         assert_eq!(game.resign(Color::Black), Err(Error::GameOver));
+    }
+
+    #[test]
+    fn constructors_apply_terminal_position_status() {
+        let no_white_king =
+            Game::from_fen("4k3/8/8/8/8/8/8/8 w - - 0 1", GameConfig::default()).unwrap();
+        assert_eq!(
+            no_white_king.status(),
+            &GameStatus::Won(GameResult {
+                winner: Color::Black,
+                reason: WinReason::KingCapture,
+            })
+        );
+
+        let move_limit = Game::new(GameConfig {
+            reversible_moves_limit: Some(0),
+            full_turn_limit: None,
+        });
+        assert_eq!(
+            move_limit.status(),
+            &GameStatus::Draw {
+                reason: crate::types::DrawReason::MoveLimit,
+            }
+        );
+
+        let turn_limit = Game::from_fen(
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 2",
+            GameConfig {
+                reversible_moves_limit: None,
+                full_turn_limit: Some(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            turn_limit.status(),
+            &GameStatus::Draw {
+                reason: crate::types::DrawReason::TurnLimit,
+            }
+        );
     }
 
     #[test]
