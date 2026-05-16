@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Game::new` now dispatches on `config.variant` to assemble the
+  starting position. Existing default-config calls produce the
+  classical FIDE start, unchanged.
+- 18 convenience constructors on `Game`, six per shuffle family
+  (`rbc_960`, `rbc_2880`, `rbc_shuffle`):
+  - `Game::new_rbc_960(sp_id, cfg)` — canonical Chess960 SP-ID
+    (0..=959); SP-ID 518 is the FIDE standard position.
+  - `Game::new_rbc_960_random(seed, cfg)` — uniform random,
+    deterministic in seed.
+  - `Game::new_rbc_960_from_backrank(arr, cfg)` — explicit back rank
+    (validated against the Chess960 constraints).
+  - `_squared`, `_squared_random`, `_squared_from_backranks` —
+    independent draws per side.
+  - Same 6-method family for `rbc_2880` and `rbc_shuffle`, using
+    lexicographic indices (0..2880, 0..5040) since neither has a
+    canonical SP-ID upstream.
+- New `examples/rbc_960.rs` demonstrating mirrored, random, and
+  squared Chess960 game construction.
+- New `tests/variants.rs` integration test suite covering each
+  constructor family.
+
 ### Changed
 
 - `CastlingRights` (internal) now stores each direction's right as
