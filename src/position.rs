@@ -12,7 +12,9 @@ pub(crate) struct CastlingRights {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Position {
-    squares: [Option<Piece>; 64],
+    bitboards: [[u64; 6]; 2],
+    occupied_by: [u64; 2],
+    occupied: u64,
     turn: Color,
     castling_rights: CastlingRights,
     en_passant: Option<Square>,
@@ -31,7 +33,10 @@ impl Position {
             return Err(invalid_fen("expected six FEN fields"));
         }
 
-        let squares = parse_piece_placement(fields[0])?;
+        let placement = parse_piece_placement(fields[0])?;
+        let bitboards = placement.bitboards;
+        let occupied_by = placement.occupied_by;
+        let occupied = placement.occupied;
         let turn = parse_active_color(fields[1])?;
         let castling_rights = parse_castling_rights(fields[2])?;
         let en_passant = parse_en_passant(fields[3])?;
@@ -46,7 +51,9 @@ impl Position {
         }
 
         Ok(Self {
-            squares,
+            bitboards,
+            occupied_by,
+            occupied,
             turn,
             castling_rights,
             en_passant,
@@ -56,16 +63,55 @@ impl Position {
     }
 
     pub(crate) fn piece_at(&self, square: Square) -> Option<Piece> {
-        self.squares[square.index() as usize]
+        let bit = 1u64 << square.index();
+        if self.occupied & bit == 0 {
+            return None;
+        }
+        let color = if self.occupied_by[Color::White.index()] & bit != 0 {
+            Color::White
+        } else {
+            Color::Black
+        };
+        let kinds = &self.bitboards[color.index()];
+        for (idx, &bb) in kinds.iter().enumerate() {
+            if bb & bit != 0 {
+                return Some(Piece {
+                    color,
+                    kind: PieceKind::from_index(idx),
+                });
+            }
+        }
+        unreachable!("occupied bit set but no piece kind matched")
     }
 
     pub(crate) fn set_piece(&mut self, square: Square, piece: Option<Piece>) {
-        self.squares[square.index() as usize] = piece;
+        let bit = 1u64 << square.index();
+        let not_bit = !bit;
+        if self.occupied & bit != 0 {
+            // Clear whatever piece was here.
+            for color_idx in 0..2 {
+                if self.occupied_by[color_idx] & bit != 0 {
+                    for bb in &mut self.bitboards[color_idx] {
+                        *bb &= not_bit;
+                    }
+                    self.occupied_by[color_idx] &= not_bit;
+                    break;
+                }
+            }
+            self.occupied &= not_bit;
+        }
+        if let Some(p) = piece {
+            self.bitboards[p.color.index()][p.kind.index()] |= bit;
+            self.occupied_by[p.color.index()] |= bit;
+            self.occupied |= bit;
+        }
     }
 
     pub(crate) fn remove_piece(&mut self, square: Square) -> Option<Piece> {
         let piece = self.piece_at(square);
-        self.set_piece(square, None);
+        if piece.is_some() {
+            self.set_piece(square, None);
+        }
         piece
     }
 
@@ -90,13 +136,11 @@ impl Position {
     }
 
     pub(crate) fn has_king(&self, color: Color) -> bool {
-        self.squares.iter().any(|piece| {
-            *piece
-                == Some(Piece {
-                    color,
-                    kind: PieceKind::King,
-                })
-        })
+        self.bitboards[color.index()][PieceKind::King.index()] != 0
+    }
+
+    pub(crate) fn piece_bitboard(&self, color: Color, kind: PieceKind) -> u64 {
+        self.bitboards[color.index()][kind.index()]
     }
 
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
@@ -154,20 +198,39 @@ impl Position {
     }
 
     pub(crate) fn to_fen(&self) -> String {
+        let mut chars = [0u8; 64];
+        for color_idx in 0..2 {
+            let color = if color_idx == 0 {
+                Color::White
+            } else {
+                Color::Black
+            };
+            for kind_idx in 0..6 {
+                let kind = PieceKind::from_index(kind_idx);
+                let mut bb = self.bitboards[color_idx][kind_idx];
+                while bb != 0 {
+                    let idx = bb.trailing_zeros() as usize;
+                    bb &= bb - 1;
+                    chars[idx] = piece_to_fen(Piece { color, kind }) as u8;
+                }
+            }
+        }
+
         let mut ranks = Vec::with_capacity(8);
         for rank in (0..8).rev() {
             let mut row = String::new();
             let mut empty_count = 0;
             for file in 0..8 {
-                let square = Square::from_coords(file, rank).expect("valid square");
-                if let Some(piece) = self.piece_at(square) {
+                let idx = (rank * 8 + file) as usize;
+                let c = chars[idx];
+                if c == 0 {
+                    empty_count += 1;
+                } else {
                     if empty_count > 0 {
                         row.push(char::from_digit(empty_count, 10).expect("single digit"));
                         empty_count = 0;
                     }
-                    row.push(piece_to_fen(piece));
-                } else {
-                    empty_count += 1;
+                    row.push(c as char);
                 }
             }
             if empty_count > 0 {
@@ -234,13 +297,21 @@ fn piece_to_fen(piece: Piece) -> char {
     }
 }
 
-fn parse_piece_placement(placement: &str) -> Result<[Option<Piece>; 64], Error> {
+struct PiecePlacement {
+    bitboards: [[u64; 6]; 2],
+    occupied_by: [u64; 2],
+    occupied: u64,
+}
+
+fn parse_piece_placement(placement: &str) -> Result<PiecePlacement, Error> {
     let ranks: Vec<_> = placement.split('/').collect();
     if ranks.len() != 8 {
         return Err(invalid_fen("expected eight ranks"));
     }
 
-    let mut squares = [None; 64];
+    let mut bitboards = [[0u64; 6]; 2];
+    let mut occupied_by = [0u64; 2];
+    let mut occupied = 0u64;
     for (fen_rank, row) in ranks.into_iter().enumerate() {
         let rank = 7 - fen_rank as u8;
         let mut file = 0_u8;
@@ -262,7 +333,11 @@ fn parse_piece_placement(placement: &str) -> Result<[Option<Piece>; 64], Error> 
                 return Err(invalid_fen("rank exceeds eight files"));
             }
             let square = Square::from_coords(file, rank).expect("validated square");
-            squares[square.index() as usize] = Some(parse_piece(symbol)?);
+            let bit = 1u64 << square.index();
+            let piece = parse_piece(symbol)?;
+            bitboards[piece.color.index()][piece.kind.index()] |= bit;
+            occupied_by[piece.color.index()] |= bit;
+            occupied |= bit;
             file += 1;
         }
 
@@ -271,7 +346,11 @@ fn parse_piece_placement(placement: &str) -> Result<[Option<Piece>; 64], Error> 
         }
     }
 
-    Ok(squares)
+    Ok(PiecePlacement {
+        bitboards,
+        occupied_by,
+        occupied,
+    })
 }
 
 fn parse_piece(symbol: char) -> Result<Piece, Error> {

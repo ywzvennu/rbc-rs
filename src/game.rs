@@ -196,15 +196,21 @@ impl Game {
         };
 
         let mut moves = Vec::new();
-        for index in 0..64 {
-            let from = Square::from_index(index).expect("valid square");
-            let Some(piece) = self.piece_at(from) else {
-                continue;
-            };
-            if piece.color != turn {
-                continue;
+        for kind in [
+            PieceKind::King,
+            PieceKind::Queen,
+            PieceKind::Rook,
+            PieceKind::Bishop,
+            PieceKind::Knight,
+            PieceKind::Pawn,
+        ] {
+            let mut bb = self.position.piece_bitboard(turn, kind);
+            while bb != 0 {
+                let idx = bb.trailing_zeros() as u8;
+                bb &= bb - 1;
+                let from = Square::from_index(idx).expect("valid square");
+                self.add_piece_move_actions(from, Piece { color: turn, kind }, &mut moves);
             }
-            self.add_piece_move_actions(from, piece, &mut moves);
         }
         moves.sort_by_key(move_sort_key);
         moves.dedup();

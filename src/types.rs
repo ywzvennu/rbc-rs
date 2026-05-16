@@ -133,6 +133,31 @@ pub enum PieceKind {
     Pawn,
 }
 
+impl PieceKind {
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::King => 0,
+            Self::Queen => 1,
+            Self::Rook => 2,
+            Self::Bishop => 3,
+            Self::Knight => 4,
+            Self::Pawn => 5,
+        }
+    }
+
+    pub(crate) const fn from_index(idx: usize) -> Self {
+        match idx {
+            0 => Self::King,
+            1 => Self::Queen,
+            2 => Self::Rook,
+            3 => Self::Bishop,
+            4 => Self::Knight,
+            5 => Self::Pawn,
+            _ => panic!("invalid piece kind index"),
+        }
+    }
+}
+
 /// A colored chess piece.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Piece {
