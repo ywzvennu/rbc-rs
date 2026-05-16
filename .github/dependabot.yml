@@ -7,6 +7,12 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    # Major bumps deserve a manual review; let dependabot open patches
+    # and minor updates only.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
@@ -16,3 +22,11 @@ updates:
     labels:
       - dependencies
       - ci
+    # `dtolnay/rust-toolchain` is the MSRV pin and must move deliberately
+    # in lockstep with Cargo.toml `rust-version`. Major-version bumps of
+    # other actions are also worth a manual review.
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
