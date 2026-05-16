@@ -1,16 +1,12 @@
-use std::str::FromStr;
-
-use cozy_chess::{Board, File, Rank};
-
+use crate::position::Position;
 use crate::types::{
-    Color, Error, GameConfig, GameStatus, HistoryEntry, Piece, PieceKind, SenseResult,
-    SensedSquare, Square,
+    Color, Error, GameConfig, GameStatus, HistoryEntry, Piece, SenseResult, SensedSquare, Square,
 };
 
 /// Reconnaissance Blind Chess game state.
 #[derive(Clone, Debug)]
 pub struct Game {
-    board: Board,
+    position: Position,
     config: GameConfig,
     status: GameStatus,
     history: Vec<HistoryEntry>,
@@ -21,10 +17,13 @@ impl Game {
     /// Creates a game in the standard chess starting position.
     #[must_use]
     pub fn new(config: GameConfig) -> Self {
+        let position = Position::standard();
         Self {
-            board: Board::default(),
+            status: GameStatus::Ongoing {
+                turn: position.turn(),
+            },
+            position,
             config,
-            status: GameStatus::Ongoing { turn: Color::White },
             history: Vec::new(),
             pending_capture: [None, None],
         }
@@ -32,12 +31,13 @@ impl Game {
 
     /// Creates a game from a FEN string.
     pub fn from_fen(fen: &str, config: GameConfig) -> Result<Self, Error> {
-        let board = Board::from_str(fen).map_err(|err| Error::InvalidFen(err.to_string()))?;
-        let turn = from_cozy_color(board.side_to_move());
+        let position = Position::from_fen(fen)?;
         Ok(Self {
-            board,
+            status: GameStatus::Ongoing {
+                turn: position.turn(),
+            },
+            position,
             config,
-            status: GameStatus::Ongoing { turn },
             history: Vec::new(),
             pending_capture: [None, None],
         })
@@ -46,7 +46,7 @@ impl Game {
     /// Returns the current FEN string.
     #[must_use]
     pub fn to_fen(&self) -> String {
-        self.board.to_string()
+        self.position.to_fen()
     }
 
     /// Returns static game configuration.
@@ -88,10 +88,11 @@ impl Game {
     /// Returns the square where the opponent captured a piece before this turn.
     #[must_use]
     pub fn opponent_capture_square(&self, color: Color) -> Option<Square> {
-        self.pending_capture[color_index(color)]
+        self.pending_capture[color.index()]
     }
 
     /// Performs a sense action.
+    #[must_use]
     pub fn sense(&self, center: Option<Square>) -> SenseResult {
         let Some(center) = center else {
             return SenseResult {
@@ -127,42 +128,7 @@ impl Game {
     /// Returns the piece at a square.
     #[must_use]
     pub fn piece_at(&self, square: Square) -> Option<Piece> {
-        let cozy_square = to_cozy_square(square);
-        let kind = self.board.piece_on(cozy_square).map(from_cozy_piece)?;
-        let color = self.board.color_on(cozy_square).map(from_cozy_color)?;
-        Some(Piece { color, kind })
-    }
-}
-
-fn color_index(color: Color) -> usize {
-    match color {
-        Color::White => 0,
-        Color::Black => 1,
-    }
-}
-
-fn to_cozy_square(square: Square) -> cozy_chess::Square {
-    cozy_chess::Square::new(
-        File::index(square.file() as usize),
-        Rank::index(square.rank() as usize),
-    )
-}
-
-fn from_cozy_color(color: cozy_chess::Color) -> Color {
-    match color {
-        cozy_chess::Color::White => Color::White,
-        cozy_chess::Color::Black => Color::Black,
-    }
-}
-
-fn from_cozy_piece(piece: cozy_chess::Piece) -> PieceKind {
-    match piece {
-        cozy_chess::Piece::King => PieceKind::King,
-        cozy_chess::Piece::Queen => PieceKind::Queen,
-        cozy_chess::Piece::Rook => PieceKind::Rook,
-        cozy_chess::Piece::Bishop => PieceKind::Bishop,
-        cozy_chess::Piece::Knight => PieceKind::Knight,
-        cozy_chess::Piece::Pawn => PieceKind::Pawn,
+        self.position.piece_at(square)
     }
 }
 

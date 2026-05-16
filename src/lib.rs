@@ -5,6 +5,8 @@
 
 mod types;
 
+mod position;
+
 mod game;
 
 pub use game::Game;
