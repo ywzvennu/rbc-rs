@@ -12,12 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New dependency on [`chess-startpos-rs`](https://crates.io/crates/chess-startpos-rs)
   (`= "0.1"`). Provides the constraint engine that drives the shuffle
   variants.
-- New `Variant` enum on `GameConfig`: `Standard` (default — classical
-  FIDE chess), `Mirrored { problem, index }` (both sides start with the
-  same back-rank arrangement drawn at the given index), `Independent {
-  problem, white_index, black_index }` (the two sides draw
-  independently — RBC-flavoured, removes inference of opponent's
-  setup from your own). `#[non_exhaustive]`.
+- New `Variant` enum on `GameConfig` storing the **already-sampled**
+  back-rank arrangement for each named family:
+  - `Standard` (default — classical FIDE chess).
+  - `Rbc960 { backrank }` / `Rbc960Squared { white, black }` — Chess960
+    (bishops opposite, king between rooks).
+  - `Rbc2880 { backrank }` / `Rbc2880Squared { white, black }` —
+    Chess2880 (bishops opposite, no king-between-rooks).
+  - `RbcShuffle { backrank }` / `RbcShuffleSquared { white, black }` —
+    unconstrained KQRRBBNN shuffle.
+  - `#[non_exhaustive]`. `Copy + Eq + Hash` (the back-rank arrays are
+    fully baked, no upstream constraint problem).
 - New `CastlingPolicy` struct on `GameConfig`: per-side, per-direction
   toggles applied as an intersection with the structural rights
   derived from the chosen back rank. Defaults to all four directions
@@ -26,19 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and mutate, no struct-literal from external crates.
 - Re-exports: `Variant`, `CastlingPolicy`.
 
-### Changed
-
-- `GameConfig` no longer derives `Eq` / `PartialEq` because `Variant`
-  embeds a `chess_startpos_rs::Problem` which does not.
-
 ### Planned
 
 - Game::new wiring: assemble the starting FEN from `config.variant`.
 - X-FEN castling support so non-standard rook files survive FEN
   round-trips.
 - Convenience constructors `Game::new_rbc_960` / `new_rbc_2880` /
-  `new_rbc_shuffle` and their mirrored / squared / `_random`
-  variants.
+  `new_rbc_shuffle` and their mirrored / squared / `_random` /
+  `_from_backrank(s)` shapes (18 total).
 - `rbc-setup` game mode — RBC played from user-configured starting
   positions, similar to setup chess on chess.com.
 
