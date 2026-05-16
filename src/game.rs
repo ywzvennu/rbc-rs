@@ -3,6 +3,7 @@ use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
     MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, WinReason,
 };
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const PROMOTION_PIECES: [PieceKind; 4] = [
@@ -23,6 +24,7 @@ pub struct Game {
     pending_sense: Option<SenseResult>,
 }
 
+#[cfg(feature = "serde")]
 #[derive(Serialize, Deserialize)]
 struct SerializedGame {
     fen: String,
@@ -33,6 +35,7 @@ struct SerializedGame {
     pending_sense: Option<SenseResult>,
 }
 
+#[cfg(feature = "serde")]
 impl Serialize for Game {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -50,6 +53,7 @@ impl Serialize for Game {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for Game {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1453,6 +1457,7 @@ mod tests {
         assert!(game.history()[0].sense.squares.is_empty());
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn game_serializes_with_history() {
         let mut game = Game::new(GameConfig::default());
