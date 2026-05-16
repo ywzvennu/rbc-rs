@@ -328,17 +328,16 @@ pub struct HistoryEntry {
 }
 
 /// Library error type.
+///
+/// Marked `#[non_exhaustive]` so future variant additions are
+/// non-breaking. Downstream `match` arms should include a `_ => ...`
+/// catch-all.
+#[non_exhaustive]
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum Error {
     /// The game has already ended.
     #[error("game is over")]
     GameOver,
-    /// The requested color is not the side to move.
-    #[error("wrong turn")]
-    WrongTurn,
-    /// The requested square is invalid.
-    #[error("invalid square")]
-    InvalidSquare,
     /// The requested move is invalid for move generation.
     #[error("invalid move")]
     InvalidMove,
