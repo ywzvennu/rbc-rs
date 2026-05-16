@@ -5,7 +5,8 @@ chess in which each player can see only their own pieces and must spend one
 "sense" action per turn revealing a 3×3 window of the opponent's position
 before committing to a move. The game was developed and is run as an annual
 research tournament by the [Johns Hopkins University Applied Physics
-Laboratory][jhuapl] at [rbc.jhuapl.edu][rbc].
+Laboratory][jhuapl] at [rbc.jhuapl.edu][rbc]; the full rules are documented
+at [rbc.jhuapl.edu/gameRules][rbc-rules].
 
 `rbc-rs` aims to be the canonical Rust home for the rules layer: behaviourally
 equivalent to the upstream Python [`reconchess`][reconchess-py] package, with
@@ -93,29 +94,20 @@ The upstream Python package builds on the excellent
 crate has no equivalent dependency — all chess mechanics are crate-owned
 and implemented in-tree.
 
-## Speed
+## Performance
 
 The crate uses a bitboard-backed `Position`, precomputed knight/king/pawn
 attack tables, and a ray-table-with-blocker-subtract pattern for sliders.
-The `cargo bench --bench game` harness exercises move generation, move
-application, sensing, FEN round-tripping, and a full-game replay. Indicative
-numbers on a recent x86_64 machine (criterion midpoints):
+A [criterion][criterion] bench harness exercises move generation, move
+application, sensing, FEN round-tripping, slider-heavy midgames, and a full-
+game replay. Run it locally with:
 
-| Bench                       | Time        |
-| --------------------------- | ----------- |
-| `move_actions_start`        | ~440 ns     |
-| `move_actions_midgame`      | ~600 ns     |
-| `apply_move_sequence` (8×)  | ~6 µs       |
-| `apply_opera_game` (33×)    | ~25 µs      |
-| `sense/corner`              | ~25 ns      |
-| `sense/center`              | ~25 ns      |
-| `position_from_fen`         | ~330 ns     |
-| `position_to_fen`           | ~340 ns     |
+```sh
+cargo bench --bench game
+```
 
-For comparison, the upstream Python `reconchess` is dominated by Python
-interpreter overhead. The Rust crate is orders of magnitude faster on
-per-operation cost, which makes it usable for simulation and search
-workloads where the Python original is not.
+Criterion writes timing reports under `target/criterion/` for each scenario,
+so changes to hot paths can be measured before and after.
 
 ## Roadmap
 
@@ -156,6 +148,8 @@ Licensed under the [MIT License](LICENSE).
 
 [jhuapl]: https://www.jhuapl.edu/
 [rbc]: https://rbc.jhuapl.edu/
+[rbc-rules]: https://rbc.jhuapl.edu/gameRules
 [reconchess-py]: https://github.com/reconnaissanceblindchess/reconchess
 [python-chess]: https://github.com/niklasf/python-chess
+[criterion]: https://github.com/bheisler/criterion.rs
 [issues]: https://github.com/ywzvennu/rbc-rs/issues
