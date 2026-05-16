@@ -1,4 +1,4 @@
-use crate::types::{Color, Error, Piece, PieceKind, Square};
+use crate::types::{CastlingPolicy, Color, Error, Piece, PieceKind, Square};
 
 const STANDARD_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -45,6 +45,99 @@ pub(crate) struct Position {
 impl Position {
     pub(crate) fn standard() -> Self {
         Self::from_fen(STANDARD_FEN).expect("standard starting FEN is valid")
+    }
+
+    /// Assembles a starting [`Position`] from white's and black's
+    /// back-rank arrangements.
+    ///
+    /// Ranks 2 / 7 are filled with pawns, ranks 3–6 are empty. The
+    /// castling-rights field is derived from the king + rook
+    /// positions on each back rank (the king's nearest h-side rook
+    /// gives kingside rights; nearest a-side rook gives queenside),
+    /// intersected with `policy`. White is to move; halfmove clock
+    /// 0; fullmove 1.
+    ///
+    /// Returns `Err` if either back rank lacks a king (the function
+    /// otherwise tolerates any 8-piece arrangement).
+    pub(crate) fn from_starting_backranks(
+        white_backrank: &[crate::types::PieceKind; 8],
+        black_backrank: &[crate::types::PieceKind; 8],
+        policy: &CastlingPolicy,
+    ) -> Result<Self, Error> {
+        let mut bitboards = [[0u64; 6]; 2];
+        let mut occupied_by = [0u64; 2];
+        let mut occupied = 0u64;
+
+        // Rank 1 — white back rank.
+        for (file, kind) in white_backrank.iter().enumerate() {
+            let bit = 1u64 << (file as u32);
+            bitboards[Color::White.index()][kind.index()] |= bit;
+            occupied_by[Color::White.index()] |= bit;
+            occupied |= bit;
+        }
+        // Rank 2 — white pawns.
+        for file in 0..8 {
+            let bit = 1u64 << (8 + file);
+            bitboards[Color::White.index()][PieceKind::Pawn.index()] |= bit;
+            occupied_by[Color::White.index()] |= bit;
+            occupied |= bit;
+        }
+        // Rank 7 — black pawns.
+        for file in 0..8 {
+            let bit = 1u64 << (48 + file);
+            bitboards[Color::Black.index()][PieceKind::Pawn.index()] |= bit;
+            occupied_by[Color::Black.index()] |= bit;
+            occupied |= bit;
+        }
+        // Rank 8 — black back rank.
+        for (file, kind) in black_backrank.iter().enumerate() {
+            let bit = 1u64 << (56 + file as u32);
+            bitboards[Color::Black.index()][kind.index()] |= bit;
+            occupied_by[Color::Black.index()] |= bit;
+            occupied |= bit;
+        }
+
+        // Derive structural castling rights from king + rook positions.
+        let derive = |color: Color, kingside: bool| -> Option<u8> {
+            find_rook_file(&bitboards, color, kingside)
+        };
+        let mut rights = CastlingRights {
+            white_kingside: derive(Color::White, true),
+            white_queenside: derive(Color::White, false),
+            black_kingside: derive(Color::Black, true),
+            black_queenside: derive(Color::Black, false),
+        };
+        if !policy.white_kingside {
+            rights.white_kingside = None;
+        }
+        if !policy.white_queenside {
+            rights.white_queenside = None;
+        }
+        if !policy.black_kingside {
+            rights.black_kingside = None;
+        }
+        if !policy.black_queenside {
+            rights.black_queenside = None;
+        }
+
+        // Both back ranks must contain a king for the position to be
+        // valid for play.
+        if bitboards[Color::White.index()][PieceKind::King.index()] == 0
+            || bitboards[Color::Black.index()][PieceKind::King.index()] == 0
+        {
+            return Err(invalid_fen("starting back rank missing a king"));
+        }
+
+        Ok(Self {
+            bitboards,
+            occupied_by,
+            occupied,
+            turn: Color::White,
+            castling_rights: rights,
+            en_passant: None,
+            halfmove_clock: 0,
+            fullmove_number: 1,
+        })
     }
 
     pub(crate) fn from_fen(fen: &str) -> Result<Self, Error> {
