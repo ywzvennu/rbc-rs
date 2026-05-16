@@ -24,10 +24,13 @@ jobs:
       - run: cargo doc --no-deps --all-features
 
   msrv:
-    name: msrv (1.80) / build + test
+    # Verifies the library compiles on the declared MSRV. Scoped to
+    # `cargo check --lib` because dev-deps (criterion, clap, ...) drag
+    # in toolchain requirements that are newer than this crate's MSRV.
+    name: msrv (1.80) / library check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.80.0
-      - run: cargo build --all-features
-      - run: cargo test --all-features
+      - run: cargo check --all-features --lib
+      - run: cargo check --no-default-features --lib
