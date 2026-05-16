@@ -266,11 +266,17 @@ pub struct MoveOutcome {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GameStatus {
     /// Game is still running.
-    Ongoing { turn: Color },
+    Ongoing {
+        /// Color to move.
+        turn: Color,
+    },
     /// Game ended with a winner.
     Won(GameResult),
     /// Game ended in a draw.
-    Draw { reason: DrawReason },
+    Draw {
+        /// Reason the game was adjudicated as drawn.
+        reason: DrawReason,
+    },
 }
 
 /// Winning result.
