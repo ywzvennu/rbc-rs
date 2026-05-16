@@ -5,6 +5,13 @@ use crate::types::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+const PROMOTION_PIECES: [PieceKind; 4] = [
+    PieceKind::Queen,
+    PieceKind::Rook,
+    PieceKind::Bishop,
+    PieceKind::Knight,
+];
+
 /// Reconnaissance Blind Chess game state.
 #[derive(Clone, Debug)]
 pub struct Game {
@@ -763,12 +770,7 @@ fn offset(square: Square, df: i8, dr: i8) -> Option<Square> {
 
 fn add_promotion_moves(from: Square, to: Square, promotion_rank: u8, moves: &mut Vec<Move>) {
     if to.rank() == promotion_rank {
-        for promotion in [
-            PieceKind::Queen,
-            PieceKind::Rook,
-            PieceKind::Bishop,
-            PieceKind::Knight,
-        ] {
+        for promotion in PROMOTION_PIECES {
             moves.push(Move {
                 from,
                 to,
@@ -791,12 +793,7 @@ fn add_pawn_capture_moves(from: Square, to: Square, promotion_rank: u8, moves: &
         promotion: None,
     });
     if to.rank() == promotion_rank {
-        for promotion in [
-            PieceKind::Queen,
-            PieceKind::Rook,
-            PieceKind::Bishop,
-            PieceKind::Knight,
-        ] {
+        for promotion in PROMOTION_PIECES {
             moves.push(Move {
                 from,
                 to,
