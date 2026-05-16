@@ -160,9 +160,7 @@ impl Game {
         let color = self.turn().ok_or(Error::GameOver)?;
         let Some(requested_move) = requested else {
             self.position.null_move();
-            self.status = GameStatus::Ongoing {
-                turn: self.position.turn(),
-            };
+            self.update_status_after_turn();
             self.pending_capture[color.opposite().index()] = None;
             return Ok(MoveOutcome {
                 requested: None,
@@ -179,9 +177,7 @@ impl Game {
 
         let Some(taken_move) = self.revise_move(requested_move) else {
             self.position.null_move();
-            self.status = GameStatus::Ongoing {
-                turn: self.position.turn(),
-            };
+            self.update_status_after_turn();
             self.pending_capture[color.opposite().index()] = None;
             return Ok(MoveOutcome {
                 requested,
@@ -203,9 +199,7 @@ impl Game {
                 reason: WinReason::KingCapture,
             })
         } else {
-            GameStatus::Ongoing {
-                turn: self.position.turn(),
-            }
+            self.status_after_non_winning_turn()
         };
 
         Ok(MoveOutcome {
@@ -218,6 +212,28 @@ impl Game {
             },
             capture,
         })
+    }
+
+    /// Records a resignation by the given color.
+    pub fn resign(&mut self, color: Color) -> Result<GameResult, Error> {
+        self.ensure_ongoing()?;
+        let result = GameResult {
+            winner: color.opposite(),
+            reason: WinReason::Resignation,
+        };
+        self.status = GameStatus::Won(result);
+        Ok(result)
+    }
+
+    /// Records a timeout for the given color.
+    pub fn declare_timeout(&mut self, color: Color) -> Result<GameResult, Error> {
+        self.ensure_ongoing()?;
+        let result = GameResult {
+            winner: color.opposite(),
+            reason: WinReason::Timeout,
+        };
+        self.status = GameStatus::Won(result);
+        Ok(result)
     }
 
     fn add_piece_move_actions(&self, from: Square, piece: Piece, moves: &mut Vec<Move>) {
@@ -626,6 +642,43 @@ impl Game {
             en_passant,
         );
     }
+
+    fn ensure_ongoing(&self) -> Result<(), Error> {
+        match self.status {
+            GameStatus::Ongoing { .. } => Ok(()),
+            GameStatus::Won(_) | GameStatus::Draw { .. } => Err(Error::GameOver),
+        }
+    }
+
+    fn update_status_after_turn(&mut self) {
+        self.status = self.status_after_non_winning_turn();
+    }
+
+    fn status_after_non_winning_turn(&self) -> GameStatus {
+        if self
+            .config
+            .full_turn_limit
+            .map(|limit| self.position.fullmove_number() > limit)
+            .unwrap_or(false)
+        {
+            return GameStatus::Draw {
+                reason: crate::types::DrawReason::TurnLimit,
+            };
+        }
+        if self
+            .config
+            .reversible_moves_limit
+            .map(|limit| self.position.halfmove_clock() >= limit)
+            .unwrap_or(false)
+        {
+            return GameStatus::Draw {
+                reason: crate::types::DrawReason::MoveLimit,
+            };
+        }
+        GameStatus::Ongoing {
+            turn: self.position.turn(),
+        }
+    }
 }
 
 fn offset(square: Square, df: i8, dr: i8) -> Option<Square> {
@@ -1029,5 +1082,76 @@ mod tests {
             })
         );
         assert_eq!(game.to_fen(), "4Q3/8/8/8/8/8/8/4K3 b - - 0 1");
+    }
+
+    #[test]
+    fn reversible_move_limit_causes_draw() {
+        let mut game = Game::from_fen(
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            GameConfig {
+                reversible_moves_limit: Some(2),
+                full_turn_limit: None,
+            },
+        )
+        .unwrap();
+        game.apply_move(None).unwrap();
+        assert_eq!(game.status(), &GameStatus::Ongoing { turn: Color::Black });
+        game.apply_move(None).unwrap();
+        assert_eq!(
+            game.status(),
+            &GameStatus::Draw {
+                reason: crate::types::DrawReason::MoveLimit,
+            }
+        );
+    }
+
+    #[test]
+    fn full_turn_limit_causes_draw_after_black_turn() {
+        let mut game = Game::from_fen(
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            GameConfig {
+                reversible_moves_limit: None,
+                full_turn_limit: Some(1),
+            },
+        )
+        .unwrap();
+        game.apply_move(None).unwrap();
+        assert_eq!(game.status(), &GameStatus::Ongoing { turn: Color::Black });
+        game.apply_move(None).unwrap();
+        assert_eq!(
+            game.status(),
+            &GameStatus::Draw {
+                reason: crate::types::DrawReason::TurnLimit,
+            }
+        );
+    }
+
+    #[test]
+    fn resign_and_timeout_set_winner() {
+        let mut resigned = Game::new(GameConfig::default());
+        assert_eq!(
+            resigned.resign(Color::White).unwrap(),
+            GameResult {
+                winner: Color::Black,
+                reason: WinReason::Resignation,
+            }
+        );
+
+        let mut timed_out = Game::new(GameConfig::default());
+        assert_eq!(
+            timed_out.declare_timeout(Color::Black).unwrap(),
+            GameResult {
+                winner: Color::White,
+                reason: WinReason::Timeout,
+            }
+        );
+    }
+
+    #[test]
+    fn completed_game_rejects_further_actions() {
+        let mut game = Game::new(GameConfig::default());
+        game.resign(Color::White).unwrap();
+        assert_eq!(game.apply_move(None), Err(Error::GameOver));
+        assert_eq!(game.resign(Color::Black), Err(Error::GameOver));
     }
 }

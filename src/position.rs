@@ -58,6 +58,14 @@ impl Position {
         self.en_passant
     }
 
+    pub(crate) fn halfmove_clock(&self) -> u16 {
+        self.halfmove_clock
+    }
+
+    pub(crate) fn fullmove_number(&self) -> u16 {
+        self.fullmove_number
+    }
+
     pub(crate) fn set_en_passant(&mut self, square: Option<Square>) {
         self.en_passant = square;
     }
