@@ -1,4 +1,4 @@
-# reconchess-rs
+# rbc-rs
 
 Reconnaissance Blind Chess game logic for Rust.
 

@@ -1,4 +1,4 @@
-use reconchess_rs::{
+use rbc_rs::{
     Color, DrawReason, Error, Game, GameConfig, GameResult, GameStatus, Move, MoveStatus, Piece,
     PieceKind, Square, WinReason,
 };
