@@ -1,5 +1,7 @@
 # rbc-rs
 
+[![crates.io](https://img.shields.io/crates/v/rbc-rs.svg)](https://crates.io/crates/rbc-rs)
+[![docs.rs](https://img.shields.io/docsrs/rbc-rs)](https://docs.rs/rbc-rs)
 [![CI](https://github.com/ywzvennu/rbc-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/ywzvennu/rbc-rs/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.80-blue.svg)](Cargo.toml)
