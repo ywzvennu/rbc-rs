@@ -5,8 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
+
 jobs:
   test:
+    name: stable / fmt + clippy + test + doc
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -15,4 +20,14 @@ jobs:
           components: clippy, rustfmt
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+      - run: cargo doc --no-deps --all-features
+
+  msrv:
+    name: msrv (1.75) / build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - run: cargo build --all-features
       - run: cargo test --all-features
