@@ -274,12 +274,12 @@ pub struct GameConfig {
     /// Per-side, per-direction castling-right toggles applied at
     /// game start. See [`CastlingPolicy`].
     pub castling_policy: CastlingPolicy,
-    /// Shape of white's sense action. Defaults to
-    /// [`SenseShape::window`]`(1)` — the standard RBC 3×3 window.
-    pub white_sense_shape: SenseShape,
-    /// Shape of black's sense action. Defaults to
-    /// [`SenseShape::window`]`(1)`.
-    pub black_sense_shape: SenseShape,
+    /// White's sense capability. Default is one [`SenseToken`] with
+    /// the standard 3×3 [`SenseShape`].
+    pub white_sense_policy: SensePolicy,
+    /// Black's sense capability. Default is one [`SenseToken`] with
+    /// the standard 3×3 [`SenseShape`].
+    pub black_sense_policy: SensePolicy,
 }
 
 impl Default for GameConfig {
@@ -290,8 +290,8 @@ impl Default for GameConfig {
             white_backrank: STANDARD_BACK_RANK,
             black_backrank: STANDARD_BACK_RANK,
             castling_policy: CastlingPolicy::default(),
-            white_sense_shape: SenseShape::default(),
-            black_sense_shape: SenseShape::default(),
+            white_sense_policy: SensePolicy::default(),
+            black_sense_policy: SensePolicy::default(),
         }
     }
 }
@@ -301,9 +301,9 @@ impl Default for GameConfig {
 ///
 /// The default sense shape is [`SenseShape::window`]`(1)`, which is
 /// the 3×3 window centred on the chosen square (today's RBC
-/// behaviour). Variants can use different shapes per side via
-/// [`GameConfig::white_sense_shape`] and
-/// [`GameConfig::black_sense_shape`].
+/// behaviour). Variants can use different shapes per side by setting
+/// a [`SenseToken`] with a custom shape in
+/// [`GameConfig::white_sense_policy`] / [`GameConfig::black_sense_policy`].
 ///
 /// Offsets are signed (`i8`) so a shape can extend in any direction
 /// relative to the center. At sense time the shape is clipped to the
@@ -421,6 +421,90 @@ impl Default for SenseShape {
     }
 }
 
+/// A single sense capability — a shape the holder can sense with.
+///
+/// Today every game starts with exactly one token per side (the
+/// standard 3×3 RBC behaviour). Multi-token policies and per-game /
+/// per-turn budgets are tracking issues #86 / #87; this struct is
+/// `#[non_exhaustive]` so those additions land non-breaking.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub struct SenseToken {
+    /// The shape this token reveals when used.
+    pub shape: SenseShape,
+}
+
+impl SenseToken {
+    /// Constructs a token with the given shape.
+    #[must_use]
+    pub fn new(shape: SenseShape) -> Self {
+        Self { shape }
+    }
+}
+
+impl Default for SenseToken {
+    fn default() -> Self {
+        Self::new(SenseShape::default())
+    }
+}
+
+/// Per-side configuration of the sense capability — a list of
+/// [`SenseToken`]s.
+///
+/// Today every default policy has exactly one token (the standard
+/// 3×3 RBC sense). Multi-token policies will be enabled by issue
+/// #86 — at that point this `Vec` may hold multiple entries.
+///
+/// `#[non_exhaustive]` so future fields (e.g. per-turn / per-game
+/// budgets, replenishment policies) land non-breaking.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub struct SensePolicy {
+    /// The tokens available to the holder. Currently always
+    /// length-1 in default usage; multi-token support lands in #86.
+    pub tokens: Vec<SenseToken>,
+}
+
+impl SensePolicy {
+    /// Constructs a policy with a single token of the given shape.
+    /// Convenience for the common "one shape per side" case.
+    #[must_use]
+    pub fn single(shape: SenseShape) -> Self {
+        Self {
+            tokens: vec![SenseToken::new(shape)],
+        }
+    }
+}
+
+impl Default for SensePolicy {
+    fn default() -> Self {
+        Self::single(SenseShape::default())
+    }
+}
+
+/// Opaque identifier for a sense token within a [`Game`](crate::Game).
+///
+/// Never constructed by the user directly — the engine assigns IDs
+/// at game-start (and at mid-game grants, planned for #87). Returned
+/// from [`Game::sense_actions`](crate::Game::sense_actions); passed
+/// back to [`Game::sense_with`](crate::Game::sense_with).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct SenseTokenId(pub(crate) u32);
+
+/// A specific (token, center) sense the player wants to perform.
+/// Constructed only by [`Game::sense_actions`](crate::Game::sense_actions).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct SenseAction {
+    /// Opaque token identifier.
+    pub token: SenseTokenId,
+    /// Center square the sense is performed from.
+    pub center: Square,
+}
+
 /// A sensed square and its current piece, if any.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -432,12 +516,17 @@ pub struct SensedSquare {
 }
 
 /// Result of a sense action.
+///
+/// Passing on sense is **not** represented as a `SenseResult` — the
+/// player simply does not call `sense_with` for that turn, and the
+/// turn's recorded `senses` is an empty `Vec`.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SenseResult {
-    /// Requested center square. `None` represents a pass sense.
-    pub center: Option<Square>,
-    /// Sensed squares in rank-descending, file-ascending order.
+    /// The action that produced this result.
+    pub action: SenseAction,
+    /// Sensed squares, in the order defined by the token's
+    /// [`SenseShape::offsets`].
     pub squares: Vec<SensedSquare>,
 }
 
@@ -535,8 +624,9 @@ pub enum DrawReason {
 pub struct HistoryEntry {
     /// Acting color.
     pub color: Color,
-    /// Sense result.
-    pub sense: SenseResult,
+    /// Sense actions performed this turn, in the order they were
+    /// performed. Empty `Vec` if the player did not sense.
+    pub senses: Vec<SenseResult>,
     /// Move outcome.
     pub move_outcome: MoveOutcome,
     /// FEN before the move.
@@ -562,4 +652,8 @@ pub enum Error {
     /// FEN parsing failed.
     #[error("invalid FEN: {0}")]
     InvalidFen(String),
+    /// The requested sense action references an unknown or
+    /// unavailable token, or an out-of-range center square.
+    #[error("invalid sense action")]
+    InvalidSense,
 }

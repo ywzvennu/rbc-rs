@@ -1,7 +1,8 @@
 use crate::position::Position;
 use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
-    MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, WinReason,
+    MoveStatus, Piece, PieceKind, SenseAction, SensePolicy, SenseResult, SenseShape, SenseToken,
+    SenseTokenId, SensedSquare, Square, WinReason,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -13,6 +14,60 @@ const PROMOTION_PIECES: [PieceKind; 4] = [
     PieceKind::Knight,
 ];
 
+/// Per-side runtime sense state — the tokens granted to the side,
+/// each with an opaque ID and a `used_this_turn` flag that resets at
+/// each turn boundary.
+#[derive(Clone, Debug)]
+struct SenseRuntime {
+    tokens: Vec<RuntimeToken>,
+    next_id: u32,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeToken {
+    id: SenseTokenId,
+    shape: SenseShape,
+    used_this_turn: bool,
+}
+
+impl SenseRuntime {
+    fn from_policy(policy: &SensePolicy) -> Self {
+        let mut runtime = Self {
+            tokens: Vec::with_capacity(policy.tokens.len()),
+            next_id: 0,
+        };
+        for token in &policy.tokens {
+            runtime.add_token(token.clone());
+        }
+        runtime
+    }
+
+    fn add_token(&mut self, token: SenseToken) -> SenseTokenId {
+        let id = SenseTokenId(self.next_id);
+        self.next_id += 1;
+        self.tokens.push(RuntimeToken {
+            id,
+            shape: token.shape,
+            used_this_turn: false,
+        });
+        id
+    }
+
+    fn reset_per_turn(&mut self) {
+        for token in &mut self.tokens {
+            token.used_this_turn = false;
+        }
+    }
+
+    fn token(&self, id: SenseTokenId) -> Option<&RuntimeToken> {
+        self.tokens.iter().find(|t| t.id == id)
+    }
+
+    fn token_mut(&mut self, id: SenseTokenId) -> Option<&mut RuntimeToken> {
+        self.tokens.iter_mut().find(|t| t.id == id)
+    }
+}
+
 /// Reconnaissance Blind Chess game state.
 #[derive(Clone, Debug)]
 pub struct Game {
@@ -21,7 +76,11 @@ pub struct Game {
     status: GameStatus,
     history: Vec<HistoryEntry>,
     pending_capture: [Option<Square>; 2],
-    pending_sense: Option<SenseResult>,
+    /// Sense results performed during the current player's sense
+    /// phase. Drained into `HistoryEntry.senses` at `apply_move` and
+    /// cleared.
+    pending_senses: Vec<SenseResult>,
+    sense_state: [SenseRuntime; 2],
 }
 
 #[cfg(feature = "serde")]
@@ -32,7 +91,7 @@ struct SerializedGame {
     status: GameStatus,
     history: Vec<HistoryEntry>,
     pending_capture: [Option<Square>; 2],
-    pending_sense: Option<SenseResult>,
+    pending_senses: Vec<SenseResult>,
 }
 
 #[cfg(feature = "serde")]
@@ -47,7 +106,7 @@ impl Serialize for Game {
             status: self.status.clone(),
             history: self.history.clone(),
             pending_capture: self.pending_capture,
-            pending_sense: self.pending_sense.clone(),
+            pending_senses: self.pending_senses.clone(),
         }
         .serialize(serializer)
     }
@@ -61,13 +120,18 @@ impl<'de> Deserialize<'de> for Game {
     {
         let serialized = SerializedGame::deserialize(deserializer)?;
         let position = Position::from_fen(&serialized.fen).map_err(serde::de::Error::custom)?;
+        let sense_state = [
+            SenseRuntime::from_policy(&serialized.config.white_sense_policy),
+            SenseRuntime::from_policy(&serialized.config.black_sense_policy),
+        ];
         Ok(Self {
             position,
             config: serialized.config,
             status: serialized.status,
             history: serialized.history,
             pending_capture: serialized.pending_capture,
-            pending_sense: serialized.pending_sense,
+            pending_senses: serialized.pending_senses,
+            sense_state,
         })
     }
 }
@@ -90,26 +154,36 @@ impl Game {
     pub fn new(config: GameConfig) -> Self {
         let position =
             build_starting_position(&config).expect("config must produce a valid position");
+        let sense_state = [
+            SenseRuntime::from_policy(&config.white_sense_policy),
+            SenseRuntime::from_policy(&config.black_sense_policy),
+        ];
         Self {
             status: initial_status(&position, &config),
             position,
             config,
             history: Vec::new(),
             pending_capture: [None, None],
-            pending_sense: None,
+            pending_senses: Vec::new(),
+            sense_state,
         }
     }
 
     /// Creates a game from a FEN string.
     pub fn from_fen(fen: &str, config: GameConfig) -> Result<Self, Error> {
         let position = Position::from_fen(fen)?;
+        let sense_state = [
+            SenseRuntime::from_policy(&config.white_sense_policy),
+            SenseRuntime::from_policy(&config.black_sense_policy),
+        ];
         Ok(Self {
             status: initial_status(&position, &config),
             position,
             config,
             history: Vec::new(),
             pending_capture: [None, None],
-            pending_sense: None,
+            pending_senses: Vec::new(),
+            sense_state,
         })
     }
 
@@ -146,13 +220,46 @@ impl Game {
         }
     }
 
-    /// Returns all legal sense center squares.
+    /// Returns every `(token, center)` sense action the current
+    /// player can perform this turn — each available token paired
+    /// with each of the 64 board squares.
+    ///
+    /// Today every default policy has exactly one token per side, so
+    /// the returned `Vec` has 64 entries when the player still has
+    /// their sense for the turn, and is empty after they've sensed
+    /// (or after the game ends).
     #[must_use]
-    pub fn sense_actions(&self) -> Vec<Square> {
-        if self.turn().is_none() {
+    pub fn sense_actions(&self) -> Vec<SenseAction> {
+        let Some(turn) = self.turn() else {
+            return Vec::new();
+        };
+        let runtime = &self.sense_state[turn.index()];
+        let available_tokens: Vec<SenseTokenId> = runtime
+            .tokens
+            .iter()
+            .filter(|t| !t.used_this_turn)
+            .map(|t| t.id)
+            .collect();
+        if available_tokens.is_empty() {
             return Vec::new();
         }
-        (0..64).filter_map(Square::from_index).collect()
+        let mut actions = Vec::with_capacity(available_tokens.len() * 64);
+        for token in available_tokens {
+            for sq_idx in 0..64 {
+                let center = Square::from_index(sq_idx).expect("valid square");
+                actions.push(SenseAction { token, center });
+            }
+        }
+        actions
+    }
+
+    /// Returns the [`SenseShape`] of `token` for `color`, if any.
+    /// Useful for UIs that want to label tokens by shape.
+    #[must_use]
+    pub fn token_shape(&self, color: Color, token: SenseTokenId) -> Option<&SenseShape> {
+        self.sense_state[color.index()]
+            .token(token)
+            .map(|t| &t.shape)
     }
 
     /// Returns the square where the opponent captured a piece before this turn.
@@ -161,37 +268,38 @@ impl Game {
         self.pending_capture[color.index()]
     }
 
-    /// Performs a sense action.
+    /// Performs a sense, using the given `action`.
     ///
-    /// The set of squares revealed is determined by the current
-    /// player's configured [`crate::SenseShape`]
-    /// ([`GameConfig::white_sense_shape`] or
-    /// [`GameConfig::black_sense_shape`]). Shapes are clipped to
-    /// the board — offsets that fall outside files / ranks `0..=7`
-    /// are dropped.
+    /// The action must come from a prior call to
+    /// [`sense_actions`](Self::sense_actions) — the engine validates
+    /// that `action.token` belongs to the current player and is
+    /// available (not yet used this turn). The shape revealed is
+    /// the one configured on that token in
+    /// [`GameConfig::white_sense_policy`] or
+    /// [`GameConfig::black_sense_policy`]. On success, marks the
+    /// token used for the turn, records the [`SenseResult`] for
+    /// inclusion in the next [`HistoryEntry`], and returns the
+    /// revealed squares.
     ///
-    /// Passing `None` is a no-op pass: returns an empty
-    /// `SenseResult`.
-    #[must_use]
-    pub fn sense(&mut self, center: Option<Square>) -> SenseResult {
-        let Some(center) = center else {
-            let result = SenseResult {
-                center: None,
-                squares: Vec::new(),
-            };
-            self.pending_sense = Some(result.clone());
-            return result;
+    /// Passing on sense is **not** a `sense_with` call — the player
+    /// simply calls [`apply_move`](Self::apply_move) without first
+    /// calling `sense_with`, and the resulting history entry has an
+    /// empty `senses` vector.
+    pub fn sense_with(&mut self, action: SenseAction) -> Result<SenseResult, Error> {
+        let Some(turn) = self.turn() else {
+            return Err(Error::InvalidSense);
         };
-
-        let shape = match self.turn() {
-            Some(Color::White) => &self.config.white_sense_shape,
-            Some(Color::Black) => &self.config.black_sense_shape,
-            None => &self.config.white_sense_shape, // game over; shape unused
-        };
+        let runtime = &mut self.sense_state[turn.index()];
+        let token = runtime.token_mut(action.token).ok_or(Error::InvalidSense)?;
+        if token.used_this_turn {
+            return Err(Error::InvalidSense);
+        }
+        let shape = token.shape.clone();
+        token.used_this_turn = true;
 
         let mut squares = Vec::with_capacity(shape.offsets.len());
-        let center_file = center.file() as i8;
-        let center_rank = center.rank() as i8;
+        let center_file = action.center.file() as i8;
+        let center_rank = action.center.rank() as i8;
         for &(dx, dy) in &shape.offsets {
             let next_file = center_file + dx;
             let next_rank = center_rank + dy;
@@ -205,12 +313,9 @@ impl Game {
             }
         }
 
-        let result = SenseResult {
-            center: Some(center),
-            squares,
-        };
-        self.pending_sense = Some(result.clone());
-        result
+        let result = SenseResult { action, squares };
+        self.pending_senses.push(result.clone());
+        Ok(result)
     }
 
     /// Returns the piece at a square.
@@ -931,17 +1036,18 @@ impl Game {
     }
 
     fn record_history(&mut self, color: Color, move_outcome: MoveOutcome, fen_before_move: String) {
-        let sense = self.pending_sense.take().unwrap_or(SenseResult {
-            center: None,
-            squares: Vec::new(),
-        });
+        let senses = std::mem::take(&mut self.pending_senses);
         self.history.push(HistoryEntry {
             color,
-            sense,
+            senses,
             move_outcome,
             fen_before_move,
             fen_after_move: self.to_fen(),
         });
+        // Reset the just-acting player's per-turn sense state so the
+        // next time it's their turn they have their per-turn tokens
+        // available again.
+        self.sense_state[color.index()].reset_per_turn();
     }
 }
 
@@ -1124,10 +1230,19 @@ mod tests {
         assert_eq!(game.to_fen(), "4k3/8/8/8/8/8/8/4K3 b - - 0 12");
     }
 
+    fn sense_at(game: &mut Game, center: Square) -> SenseResult {
+        let action = game
+            .sense_actions()
+            .into_iter()
+            .find(|a| a.center == center)
+            .expect("center available among actions");
+        game.sense_with(action).expect("valid sense action")
+    }
+
     #[test]
     fn sense_center_returns_rank_descending_file_ascending_window() {
         let mut game = Game::new(GameConfig::default());
-        let result = game.sense(Some(sq(1, 1)));
+        let result = sense_at(&mut game, sq(1, 1));
         let squares: Vec<Square> = result.squares.iter().map(|entry| entry.square).collect();
         assert_eq!(
             squares,
@@ -1148,15 +1263,37 @@ mod tests {
     #[test]
     fn sense_corner_is_clipped() {
         let mut game = Game::new(GameConfig::default());
-        let result = game.sense(Some(sq(0, 7)));
+        let result = sense_at(&mut game, sq(0, 7));
         let squares: Vec<Square> = result.squares.iter().map(|entry| entry.square).collect();
         assert_eq!(squares, vec![sq(0, 7), sq(1, 7), sq(0, 6), sq(1, 6)]);
     }
 
     #[test]
-    fn pass_sense_returns_empty_result() {
+    fn skipping_sense_yields_empty_history_senses() {
         let mut game = Game::new(GameConfig::default());
-        assert!(game.sense(None).squares.is_empty());
+        // Player makes a move without first calling sense_with.
+        game.apply_move(None).unwrap();
+        assert!(game.history()[0].senses.is_empty());
+    }
+
+    #[test]
+    fn sense_token_marked_used_until_turn_flips() {
+        let mut game = Game::new(GameConfig::default());
+        // One per-turn token: 64 actions before sensing.
+        assert_eq!(game.sense_actions().len(), 64);
+        let _ = sense_at(&mut game, sq(4, 4));
+        // Token used; no actions left this turn.
+        assert!(game.sense_actions().is_empty());
+        // Flip to black.
+        game.apply_move(None).unwrap();
+        assert_eq!(game.turn(), Some(Color::Black));
+        // Black has their own token, 64 actions.
+        assert_eq!(game.sense_actions().len(), 64);
+        // Flip back to white via black pass-move.
+        game.apply_move(None).unwrap();
+        assert_eq!(game.turn(), Some(Color::White));
+        // White's per-turn token is replenished now.
+        assert_eq!(game.sense_actions().len(), 64);
     }
 
     #[test]
@@ -1518,7 +1655,7 @@ mod tests {
     #[test]
     fn history_records_sense_and_move_outcome() {
         let mut game = Game::new(GameConfig::default());
-        let sensed = game.sense(Some(sq(1, 1)));
+        let sensed = sense_at(&mut game, sq(1, 1));
         let outcome = game
             .apply_move(Some(Move {
                 from: sq(4, 1),
@@ -1528,7 +1665,7 @@ mod tests {
             .unwrap();
         let entry = &game.history()[0];
         assert_eq!(entry.color, Color::White);
-        assert_eq!(entry.sense, sensed);
+        assert_eq!(entry.senses, vec![sensed]);
         assert_eq!(entry.move_outcome, outcome);
         assert_eq!(
             entry.fen_before_move,
@@ -1541,18 +1678,18 @@ mod tests {
     }
 
     #[test]
-    fn history_defaults_to_pass_sense_when_none_recorded() {
+    fn history_senses_empty_when_player_skips_sense() {
         let mut game = Game::new(GameConfig::default());
         game.apply_move(None).unwrap();
-        assert_eq!(game.history()[0].sense.center, None);
-        assert!(game.history()[0].sense.squares.is_empty());
+        assert!(game.history()[0].senses.is_empty());
     }
 
     #[cfg(feature = "serde")]
     #[test]
     fn game_serializes_with_history() {
         let mut game = Game::new(GameConfig::default());
-        let _ = game.sense(None);
+        // Skip sense and apply a pass; this round-trips an empty
+        // history entry.
         game.apply_move(None).unwrap();
         let json = serde_json::to_string(&game).unwrap();
         let decoded: Game = serde_json::from_str(&json).unwrap();

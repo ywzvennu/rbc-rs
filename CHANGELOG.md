@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Changed — sense API refactor
+
+- **`Game::sense(center)` → `Game::sense_with(action)`**. The center is
+  no longer passed directly; the player picks an action from
+  `Game::sense_actions()`, which now returns `Vec<SenseAction>`
+  (a `{ token, center }` pair) instead of `Vec<Square>`.
+- New opaque types: `SenseTokenId` (the engine's handle for a
+  token), `SenseAction` (token + center), `SenseToken` (`{ shape }`,
+  `#[non_exhaustive]`), `SensePolicy` (`{ tokens: Vec<SenseToken> }`,
+  `#[non_exhaustive]`).
+- `GameConfig.{white,black}_sense_shape` → `{white,black}_sense_policy`
+  (a `SensePolicy` containing exactly one token in the default).
+- `SenseResult.center: Option<Square>` → `SenseResult.action: SenseAction`.
+  Passing on sense is no longer represented as a `None` center —
+  the player simply doesn't call `sense_with` and the recorded
+  history entry's `senses` vector is empty.
+- `HistoryEntry.sense: SenseResult` → `HistoryEntry.senses: Vec<SenseResult>`
+  (today: 0 or 1 element; future multi-token policies make N > 1
+  possible).
+- New `Error::InvalidSense` variant for unknown / used / depleted
+  token IDs.
+- New `Game::token_shape(color, token_id)` accessor for UI.
+
+Default behaviour is **identical** to before the refactor — one 3×3
+sense per turn per side, optional. The new types make multi-token
+budgets (#86) and mid-game grants (#87) purely additive going
+forward: `SenseToken` and `SensePolicy` are `#[non_exhaustive]` so
+new fields land without API breakage; `Vec<SenseToken>` already
+holds more than one entry; `SenseTokenId` is opaque.
+
+### Added (kept from earlier round)
 
 - New `SenseShape` type and `white_sense_shape` / `black_sense_shape`
   fields on `GameConfig`. Default is `SenseShape::window(1)` — the

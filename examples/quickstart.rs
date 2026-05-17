@@ -2,10 +2,23 @@
 //!
 //! Run with `cargo run --example quickstart`.
 
-use rbc_rs::{Color, Game, GameConfig, Move, Square};
+use rbc_rs::{Color, Game, GameConfig, Move, SenseAction, Square};
 
 fn sq(file: u8, rank: u8) -> Square {
     Square::from_coords(file, rank).expect("valid square")
+}
+
+/// Pick the action for the given center from the current player's
+/// available actions. Today every default GameConfig has exactly one
+/// sense token per side, so each center appears in `sense_actions()`
+/// at most once.
+fn sense_at(game: &mut Game, center: Square) -> rbc_rs::SenseResult {
+    let action: SenseAction = game
+        .sense_actions()
+        .into_iter()
+        .find(|a| a.center == center)
+        .expect("center available");
+    game.sense_with(action).expect("valid action")
 }
 
 fn main() {
@@ -15,12 +28,13 @@ fn main() {
 
     // 2. The side to move can sense any 3×3 window. Sensing the centre of
     //    the board returns a full nine-square window; sensing a corner
-    //    returns a clipped window.
-    let centre_window = game.sense(Some(sq(4, 3)));
+    //    returns a clipped window. Today's default config has one sense
+    //    token per side; multi-token variants land in a future minor.
+    let centre_window = sense_at(&mut game, sq(4, 3));
     println!("centre window squares: {}", centre_window.squares.len());
-
-    let corner_window = game.sense(Some(sq(0, 0)));
-    println!("corner window squares: {}", corner_window.squares.len());
+    // Note: the per-turn token has been used, so we can't sense again
+    // this turn. To sense a corner too we'd need black's turn (or a
+    // future multi-token policy).
 
     // 3. `move_actions` returns every move the acting player can request
     //    given only their own-piece view. This includes pawn capture
