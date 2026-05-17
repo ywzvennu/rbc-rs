@@ -20,7 +20,9 @@ fn sense_at(game: &mut Game, center: Square) -> SenseResult {
         .into_iter()
         .find(|a| a.center == center)
         .expect("center available among actions");
-    game.sense_with(action).expect("valid sense action")
+    game.sense_with(action)
+        .expect("valid sense action")
+        .expect("default token is immediate-reveal")
 }
 
 #[test]

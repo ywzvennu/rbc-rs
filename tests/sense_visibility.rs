@@ -15,7 +15,9 @@ fn sense_at(game: &mut Game, center: Square) -> rbc_rs::SenseResult {
         .into_iter()
         .find(|a| a.center == center)
         .expect("center available");
-    game.sense_with(action).expect("valid action")
+    game.sense_with(action)
+        .expect("valid action")
+        .expect("token is immediate-reveal in visibility tests")
 }
 
 #[test]
@@ -143,8 +145,8 @@ fn mixed_visibility_tokens_on_one_side() {
     let mut iter = actions.iter();
     let first = *iter.next().unwrap();
     let second = *actions.iter().find(|a| a.token != first.token).unwrap();
-    let first_result = game.sense_with(first).expect("valid");
-    let second_result = game.sense_with(second).expect("valid");
+    let first_result = game.sense_with(first).expect("valid").expect("immediate");
+    let second_result = game.sense_with(second).expect("valid").expect("immediate");
     let observations = [first_result.observation(), second_result.observation()];
     assert!(observations.contains(&None), "expected one Private sense");
     assert!(
@@ -166,14 +168,17 @@ fn visibility_is_snapshotted_at_sense_time() {
         token: granted,
         center: sq(4, 4),
     };
-    let _ = game.sense_with(action).expect("valid");
+    let _ = game.sense_with(action).expect("valid").expect("immediate");
     // Use the default token so the per-turn budget is fully spent.
     let default_action: SenseAction = game
         .sense_actions()
         .into_iter()
         .find(|a| a.token != granted)
         .expect("default token available");
-    let _ = game.sense_with(default_action).expect("valid");
+    let _ = game
+        .sense_with(default_action)
+        .expect("valid")
+        .expect("immediate");
 
     // Revoke the granted token mid-history.
     assert!(game.revoke_sense_token(Color::White, granted));

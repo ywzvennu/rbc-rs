@@ -132,7 +132,7 @@ fn bench_sense_window(c: &mut Criterion) {
                 .into_iter()
                 .find(|a| a.center == sq(0, 7))
                 .expect("center available");
-            game.sense_with(black_box(action)).unwrap()
+            game.sense_with(black_box(action)).unwrap().unwrap()
         })
     });
     group.bench_function("center", |b| {
@@ -143,7 +143,7 @@ fn bench_sense_window(c: &mut Criterion) {
                 .into_iter()
                 .find(|a| a.center == sq(4, 3))
                 .expect("center available");
-            game.sense_with(black_box(action)).unwrap()
+            game.sense_with(black_box(action)).unwrap().unwrap()
         })
     });
     group.finish();

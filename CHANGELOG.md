@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — per-token sense reveal mode (#84)
+
+- New [`SenseRevealMode`] enum (`Immediate` default,
+  `Deferred`). `SenseToken` gains a `reveal_mode` field with a
+  builder-style `SenseToken::with_reveal_mode(m)` setter. Default
+  is `Immediate` so existing behaviour is preserved exactly.
+- **Breaking**: `Game::sense_with` now returns
+  `Result<Option<SenseResult>, Error>`. For
+  [`Immediate`](SenseRevealMode::Immediate) tokens it returns
+  `Ok(Some(result))` (same payload as before, just wrapped in
+  `Some`); for [`Deferred`](SenseRevealMode::Deferred) tokens it
+  buffers the result inside the engine and returns `Ok(None)`.
+  Callsite migration is one extra `.expect("immediate")` or one
+  `if let Some(result) = ...` branch.
+- New `Game::reveal_senses() -> Vec<SenseResult>` — drains the
+  deferred buffer for the current player and returns the
+  just-revealed results. Idempotent: returns an empty `Vec` once
+  the buffer is empty.
+- `Game::apply_move` auto-reveals any deferred senses the player
+  forgot to commit. They still land in `HistoryEntry.senses`;
+  they just weren't visible in time to inform this turn's move.
+- Closes #84.
+
 ### Added — per-token sense visibility (#83)
 
 - New [`SenseVisibility`] enum with six levels of opponent

@@ -421,6 +421,38 @@ impl Default for SenseShape {
     }
 }
 
+/// Per-token reveal mode — when the *senser* sees the result of
+/// their own sense.
+///
+/// `Immediate` (default) is the existing behaviour: a call to
+/// [`Game::sense_with`](crate::Game::sense_with) returns the
+/// [`SenseResult`] right away, letting the senser adaptively pick
+/// their next sense based on what they just learned.
+///
+/// `Deferred` buffers the result inside the engine; the senser
+/// gets `None` back from `sense_with` and must call
+/// [`Game::reveal_senses`](crate::Game::reveal_senses) (or rely
+/// on the auto-reveal at [`Game::apply_move`](crate::Game::apply_move))
+/// to see the result. Used by variants that want batched, non-
+/// adaptive sensing — every sense in the phase is committed
+/// before any are seen.
+///
+/// `#[non_exhaustive]` so future modes (e.g. per-sense delays)
+/// can land without a semver break.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub enum SenseRevealMode {
+    /// The senser sees the result immediately on `sense_with`.
+    #[default]
+    Immediate,
+    /// The result is buffered; the senser sees it on the next
+    /// call to [`Game::reveal_senses`](crate::Game::reveal_senses)
+    /// (or implicitly at `apply_move`, in which case it lands in
+    /// history but not in time to inform this turn's move).
+    Deferred,
+}
+
 /// Per-token visibility of a sense action to the opponent.
 ///
 /// `Private` (the default) preserves vanilla RBC: the opponent
@@ -530,17 +562,23 @@ pub struct SenseToken {
     /// How visible the use of this token is to the opponent.
     /// Defaults to [`SenseVisibility::Private`] — vanilla RBC.
     pub visibility: SenseVisibility,
+    /// When the senser sees their own result. Defaults to
+    /// [`SenseRevealMode::Immediate`] — vanilla RBC.
+    pub reveal_mode: SenseRevealMode,
 }
 
 impl SenseToken {
-    /// Constructs a token with the given shape and the default
-    /// (private) visibility. Use [`Self::with_visibility`] to
-    /// adjust.
+    /// Constructs a token with the given shape, default
+    /// ([`SenseVisibility::Private`]) visibility, and default
+    /// ([`SenseRevealMode::Immediate`]) reveal mode. Use the
+    /// builders [`Self::with_visibility`] and
+    /// [`Self::with_reveal_mode`] to adjust.
     #[must_use]
     pub fn new(shape: SenseShape) -> Self {
         Self {
             shape,
             visibility: SenseVisibility::default(),
+            reveal_mode: SenseRevealMode::default(),
         }
     }
 
@@ -548,6 +586,13 @@ impl SenseToken {
     #[must_use]
     pub fn with_visibility(mut self, visibility: SenseVisibility) -> Self {
         self.visibility = visibility;
+        self
+    }
+
+    /// Builder-style setter for [`Self::reveal_mode`].
+    #[must_use]
+    pub fn with_reveal_mode(mut self, reveal_mode: SenseRevealMode) -> Self {
+        self.reveal_mode = reveal_mode;
         self
     }
 }
