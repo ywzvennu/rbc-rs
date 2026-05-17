@@ -2,7 +2,7 @@ use crate::position::Position;
 use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
     MoveStatus, Piece, PieceKind, SenseAction, SensePolicy, SenseResult, SenseShape, SenseToken,
-    SenseTokenId, SensedSquare, Square, WinReason,
+    SenseTokenId, SenseVisibility, SensedSquare, Square, WinReason,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -27,6 +27,7 @@ struct SenseRuntime {
 struct RuntimeToken {
     id: SenseTokenId,
     shape: SenseShape,
+    visibility: SenseVisibility,
     used_this_turn: bool,
 }
 
@@ -48,6 +49,7 @@ impl SenseRuntime {
         self.tokens.push(RuntimeToken {
             id,
             shape: token.shape,
+            visibility: token.visibility,
             used_this_turn: false,
         });
         id
@@ -331,6 +333,7 @@ impl Game {
             return Err(Error::InvalidSense);
         }
         let shape = token.shape.clone();
+        let visibility = token.visibility;
         token.used_this_turn = true;
 
         let mut squares = Vec::with_capacity(shape.offsets.len());
@@ -349,7 +352,12 @@ impl Game {
             }
         }
 
-        let result = SenseResult { action, squares };
+        let result = SenseResult {
+            action,
+            squares,
+            visibility,
+            shape,
+        };
         self.pending_senses.push(result.clone());
         Ok(result)
     }

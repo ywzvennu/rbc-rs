@@ -421,25 +421,134 @@ impl Default for SenseShape {
     }
 }
 
-/// A single sense capability — a shape the holder can sense with.
+/// Per-token visibility of a sense action to the opponent.
+///
+/// `Private` (the default) preserves vanilla RBC: the opponent
+/// learns nothing about this sense. Higher levels progressively
+/// disclose existence, shape, center, and the full sensed squares.
+///
+/// Visibility is **per-token**, so a side can hold tokens with
+/// different disclosure levels (e.g. a stealthy 1×1 alongside a
+/// public full-board scan). The value is snapshotted onto each
+/// [`SenseResult`] at sense time, so later mutation or revocation
+/// of the token does not retroactively change the historical
+/// projection.
+///
+/// `#[non_exhaustive]` so future levels (e.g. partial-piece
+/// disclosure) can land without a semver break.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
+pub enum SenseVisibility {
+    /// Opponent learns nothing (vanilla RBC behaviour).
+    #[default]
+    Private,
+    /// Opponent learns a sense occurred this turn; nothing else.
+    Existence,
+    /// Opponent learns the [`SenseShape`] used, but not where.
+    Shape,
+    /// Opponent learns the center [`Square`], but not the shape.
+    Center,
+    /// Opponent learns center + shape (hence the exact sensed
+    /// squares) but **not** the piece data on those squares.
+    /// Useful for "you can see where I looked, but not what I
+    /// saw" disclosure.
+    Board,
+    /// Opponent learns center + shape + piece data on every
+    /// revealed square.
+    Full,
+}
+
+/// What the opponent observes about a single sense, given the
+/// token's [`SenseVisibility`].
+///
+/// Returned by [`SenseResult::observation`]. A [`Private`] sense
+/// yields `None`; every other level yields exactly one of these
+/// variants.
+///
+/// `#[non_exhaustive]` so it can grow alongside [`SenseVisibility`].
+///
+/// [`Private`]: SenseVisibility::Private
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SenseObservation {
+    /// The opponent knows a sense happened, but nothing about it.
+    /// Corresponds to [`SenseVisibility::Existence`].
+    ExistenceOnly,
+    /// The opponent knows the shape but not the center.
+    /// Corresponds to [`SenseVisibility::Shape`].
+    ShapeOnly {
+        /// The shape that was sensed.
+        shape: SenseShape,
+    },
+    /// The opponent knows the center but not the shape.
+    /// Corresponds to [`SenseVisibility::Center`].
+    CenterOnly {
+        /// The center square that was sensed.
+        center: Square,
+    },
+    /// The opponent knows which squares were sensed, but not the
+    /// piece data on them. Corresponds to
+    /// [`SenseVisibility::Board`].
+    BoardOnly {
+        /// The center square that was sensed.
+        center: Square,
+        /// The shape that was sensed.
+        shape: SenseShape,
+        /// The squares revealed by the sense, in the same order as
+        /// [`SenseResult::squares`] but without piece data.
+        squares: Vec<Square>,
+    },
+    /// Full disclosure — center, shape, and the revealed squares
+    /// with piece data. Corresponds to [`SenseVisibility::Full`].
+    Full {
+        /// The center square that was sensed.
+        center: Square,
+        /// The shape that was sensed.
+        shape: SenseShape,
+        /// The squares revealed by the sense, in the same order as
+        /// [`SenseResult::squares`].
+        squares: Vec<SensedSquare>,
+    },
+}
+
+/// A single sense capability — a shape the holder can sense with
+/// and the opponent-facing visibility level it advertises.
 ///
 /// Today every game starts with exactly one token per side (the
-/// standard 3×3 RBC behaviour). Multi-token policies and per-game /
-/// per-turn budgets are tracking issues #86 / #87; this struct is
-/// `#[non_exhaustive]` so those additions land non-breaking.
+/// standard 3×3 RBC behaviour, [`SenseVisibility::Private`]).
+/// Multi-token policies and per-game / per-turn budgets are
+/// tracking issues #86 / #87; this struct is `#[non_exhaustive]`
+/// so those additions land non-breaking.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct SenseToken {
     /// The shape this token reveals when used.
     pub shape: SenseShape,
+    /// How visible the use of this token is to the opponent.
+    /// Defaults to [`SenseVisibility::Private`] — vanilla RBC.
+    pub visibility: SenseVisibility,
 }
 
 impl SenseToken {
-    /// Constructs a token with the given shape.
+    /// Constructs a token with the given shape and the default
+    /// (private) visibility. Use [`Self::with_visibility`] to
+    /// adjust.
     #[must_use]
     pub fn new(shape: SenseShape) -> Self {
-        Self { shape }
+        Self {
+            shape,
+            visibility: SenseVisibility::default(),
+        }
+    }
+
+    /// Builder-style setter for [`Self::visibility`].
+    #[must_use]
+    pub fn with_visibility(mut self, visibility: SenseVisibility) -> Self {
+        self.visibility = visibility;
+        self
     }
 }
 
@@ -468,13 +577,20 @@ pub struct SensePolicy {
 }
 
 impl SensePolicy {
-    /// Constructs a policy with a single token of the given shape.
+    /// Constructs a policy with a single token of the given shape
+    /// and default ([`SenseVisibility::Private`]) visibility.
     /// Convenience for the common "one shape per side" case.
     #[must_use]
     pub fn single(shape: SenseShape) -> Self {
-        Self {
-            tokens: vec![SenseToken::new(shape)],
-        }
+        Self::from_tokens(vec![SenseToken::new(shape)])
+    }
+
+    /// Constructs a policy from an explicit list of tokens. Use
+    /// this when you need multiple tokens per side or non-default
+    /// per-token visibility / shape combinations.
+    #[must_use]
+    pub fn from_tokens(tokens: Vec<SenseToken>) -> Self {
+        Self { tokens }
     }
 }
 
@@ -528,6 +644,52 @@ pub struct SenseResult {
     /// Sensed squares, in the order defined by the token's
     /// [`SenseShape::offsets`].
     pub squares: Vec<SensedSquare>,
+    /// Visibility snapshotted from the token at sense time.
+    /// Drives [`Self::observation`]. Snapshotted (rather than
+    /// looked up live) so revocation or later mutation of the
+    /// token does not retroactively change historical projection.
+    pub visibility: SenseVisibility,
+    /// Shape snapshotted from the token at sense time. Captured
+    /// here so projections that disclose shape ([`ShapeOnly`] /
+    /// [`Full`]) don't have to fish it out of the token, which
+    /// may have been revoked by the time history is read.
+    ///
+    /// [`ShapeOnly`]: SenseObservation::ShapeOnly
+    /// [`Full`]: SenseObservation::Full
+    pub shape: SenseShape,
+}
+
+impl SenseResult {
+    /// Projects this sense to what the opponent observes.
+    ///
+    /// Returns `None` if [`Self::visibility`] is
+    /// [`SenseVisibility::Private`] — the opponent learns nothing
+    /// and the sense should be filtered out of their view of the
+    /// history. Otherwise returns the [`SenseObservation`] variant
+    /// matching the visibility level.
+    #[must_use]
+    pub fn observation(&self) -> Option<SenseObservation> {
+        match self.visibility {
+            SenseVisibility::Private => None,
+            SenseVisibility::Existence => Some(SenseObservation::ExistenceOnly),
+            SenseVisibility::Shape => Some(SenseObservation::ShapeOnly {
+                shape: self.shape.clone(),
+            }),
+            SenseVisibility::Center => Some(SenseObservation::CenterOnly {
+                center: self.action.center,
+            }),
+            SenseVisibility::Board => Some(SenseObservation::BoardOnly {
+                center: self.action.center,
+                shape: self.shape.clone(),
+                squares: self.squares.iter().map(|s| s.square).collect(),
+            }),
+            SenseVisibility::Full => Some(SenseObservation::Full {
+                center: self.action.center,
+                shape: self.shape.clone(),
+                squares: self.squares.clone(),
+            }),
+        }
+    }
 }
 
 /// Information about a capture.

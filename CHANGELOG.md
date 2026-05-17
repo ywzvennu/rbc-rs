@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — per-token sense visibility (#83)
+
+- New [`SenseVisibility`] enum with six levels of opponent
+  disclosure: `Private` (default — vanilla RBC, opponent learns
+  nothing), `Existence` (opponent knows a sense happened),
+  `Shape` (shape only, no center), `Center` (center only, no
+  shape), `Board` (center + shape + sensed squares but no piece
+  data) and `Full` (everything, including piece data).
+- `SenseToken` gains a `visibility: SenseVisibility` field with
+  a builder-style `SenseToken::with_visibility(v) -> Self` setter.
+  Default is `Private` so existing behaviour is preserved.
+- `SenseResult` gains `visibility: SenseVisibility` and `shape:
+  SenseShape` fields, snapshotted from the token at sense time —
+  so revoking or mutating the token later does not retroactively
+  change historical projection.
+- New [`SenseObservation`] enum and
+  `SenseResult::observation() -> Option<SenseObservation>`
+  accessor. Returns `None` for `Private` senses (filtered out of
+  the opponent's view); otherwise returns the appropriate
+  variant. The server walks `Game::history()` and calls
+  `observation()` per sense to compose per-viewer history.
+- New `SensePolicy::from_tokens(Vec<SenseToken>)` constructor for
+  building multi-token / non-default-visibility policies (since
+  `SensePolicy` is `#[non_exhaustive]`).
+- Closes #83.
+
 ### Added — mid-game sense token grants and revocations
 
 - `Game::grant_sense_token(color, token) -> SenseTokenId` — adds a
