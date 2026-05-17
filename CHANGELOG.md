@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (pre-v0.1.0 simplification)
+
+- **Removed `Variant` enum from the public API.** The family label
+  (Chess960 / Chess-2880 / shuffle, mirrored vs squared) is
+  matchmaking metadata for downstream consumers (a game server, a
+  matchmaking layer), not engine state. `rbc-rs` no longer carries
+  it.
+- **`GameConfig` now has `white_backrank: [PieceKind; 8]` and
+  `black_backrank: [PieceKind; 8]` fields**, defaulting to
+  [`STANDARD_BACK_RANK`] (the FIDE arrangement). `Game::new` reads
+  these directly to assemble the starting position. Setting both to
+  the same array gives a mirrored shuffle; setting them to different
+  arrays gives a squared (RBC²) game.
+- **Removed the 18 family-specific constructors** on `Game`
+  (`new_rbc_960`, `new_rbc_960_random`, `new_rbc_960_from_backrank`,
+  `_squared` variants, and the same for `rbc_2880` and
+  `rbc_shuffle`). Consumers that want a shuffle variant sample a
+  back rank via `chess-startpos-rs`, convert to `PieceKind`, and
+  set the config fields directly. See `examples/rbc_960.rs`.
+- **`chess-startpos-rs` moved from `[dependencies]` to
+  `[dev-dependencies]`.** `rbc-rs`'s public API no longer references
+  the upstream type — `PieceKind` (rbc-rs's own) is used throughout.
+  The `serde` feature no longer forwards to
+  `chess-startpos-rs/serde`.
+
 ### Added
+
+- New exported const `STANDARD_BACK_RANK: [PieceKind; 8]` — the FIDE
+  arrangement (`RNBQKBNR`).
 
 - `Game::new` now dispatches on `config.variant` to assemble the
   starting position. Existing default-config calls produce the

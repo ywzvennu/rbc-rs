@@ -17,14 +17,14 @@ exclude = [
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "chess-startpos-rs/serde"]
+serde = ["dep:serde"]
 
 [dependencies]
-chess-startpos-rs = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2"
 
 [dev-dependencies]
+chess-startpos-rs = "0.1"
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 serde_json = "1"
 
