@@ -1,6 +1,6 @@
 use rbc_rs::{
     Color, DrawReason, Error, Game, GameConfig, GameResult, GameStatus, Move, MoveStatus, Piece,
-    PieceKind, Square, WinReason,
+    PieceKind, SenseAction, Square, WinReason,
 };
 
 fn sq(file: u8, rank: u8) -> Square {
@@ -15,26 +15,34 @@ fn mv(from: (u8, u8), to: (u8, u8)) -> Move {
     }
 }
 
+fn sense_at(game: &mut Game, center: Square) -> Vec<Square> {
+    let action: SenseAction = game
+        .sense_actions()
+        .into_iter()
+        .find(|a| a.center == center)
+        .expect("center available");
+    game.sense_with(action)
+        .expect("valid action")
+        .squares
+        .into_iter()
+        .map(|entry| entry.square)
+        .collect()
+}
+
 #[test]
-fn sensing_preserves_window_order_at_edges_and_center() {
-    let mut game = Game::new(GameConfig::default());
-
-    let a8: Vec<_> = game
-        .sense(Some(sq(0, 7)))
-        .squares
-        .into_iter()
-        .map(|entry| entry.square)
-        .collect();
-    assert_eq!(a8, vec![sq(0, 7), sq(1, 7), sq(0, 6), sq(1, 6)]);
-
-    let e4: Vec<_> = game
-        .sense(Some(sq(4, 3)))
-        .squares
-        .into_iter()
-        .map(|entry| entry.square)
-        .collect();
+fn sensing_preserves_window_order_at_corners_and_center() {
+    // Each assertion below starts from a fresh game because the
+    // current default sense policy permits exactly one sense per
+    // turn per side. Multi-token policies are tracked in #86 and #87.
+    let mut g_a8 = Game::new(GameConfig::default());
     assert_eq!(
-        e4,
+        sense_at(&mut g_a8, sq(0, 7)),
+        vec![sq(0, 7), sq(1, 7), sq(0, 6), sq(1, 6)]
+    );
+
+    let mut g_e4 = Game::new(GameConfig::default());
+    assert_eq!(
+        sense_at(&mut g_e4, sq(4, 3)),
         vec![
             sq(3, 4),
             sq(4, 4),
@@ -48,13 +56,11 @@ fn sensing_preserves_window_order_at_edges_and_center() {
         ]
     );
 
-    let h1: Vec<_> = game
-        .sense(Some(sq(7, 0)))
-        .squares
-        .into_iter()
-        .map(|entry| entry.square)
-        .collect();
-    assert_eq!(h1, vec![sq(6, 1), sq(7, 1), sq(6, 0), sq(7, 0)]);
+    let mut g_h1 = Game::new(GameConfig::default());
+    assert_eq!(
+        sense_at(&mut g_h1, sq(7, 0)),
+        vec![sq(6, 1), sq(7, 1), sq(6, 0), sq(7, 0)]
+    );
 }
 
 #[test]
@@ -260,7 +266,7 @@ fn opponent_capture_square_tracks_the_latest_opponent_turn() {
     game.apply_move(Some(mv((3, 3), (4, 4)))).unwrap();
     assert_eq!(game.opponent_capture_square(Color::Black), Some(sq(4, 4)));
 
-    let _ = game.sense(Some(sq(4, 4)));
+    let _ = sense_at(&mut game, sq(4, 4));
     assert_eq!(game.opponent_capture_square(Color::Black), Some(sq(4, 4)));
 
     game.apply_move(None).unwrap();
@@ -271,7 +277,7 @@ fn opponent_capture_square_tracks_the_latest_opponent_turn() {
 fn terminal_states_and_history_round_trip() {
     let mut capture_game =
         Game::from_fen("4k3/4Q3/8/8/8/8/8/4K3 w - - 0 1", GameConfig::default()).unwrap();
-    let _ = capture_game.sense(None);
+    // Skip sense and go straight to the move.
     capture_game.apply_move(Some(mv((4, 6), (4, 7)))).unwrap();
     assert_eq!(
         capture_game.status(),

@@ -23,7 +23,12 @@
 //!
 //! // Sense a 3×3 window centred on e4 from the side to move.
 //! let center = Square::from_coords(4, 3).expect("valid square");
-//! let sense_result = game.sense(Some(center));
+//! let action = game
+//!     .sense_actions()
+//!     .into_iter()
+//!     .find(|a| a.center == center)
+//!     .expect("center available");
+//! let sense_result = game.sense_with(action).expect("valid action");
 //! assert_eq!(sense_result.squares.len(), 9);
 //!
 //! // Generate the candidate move requests for the acting player.
@@ -71,8 +76,9 @@ mod game;
 pub use game::Game;
 pub use types::{
     Capture, CastlingPolicy, Color, DrawReason, Error, GameConfig, GameResult, GameStatus,
-    HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseResult, SenseShape,
-    SensedSquare, Square, WinReason, STANDARD_BACK_RANK,
+    HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseAction, SensePolicy,
+    SenseResult, SenseShape, SenseToken, SenseTokenId, SensedSquare, Square, WinReason,
+    STANDARD_BACK_RANK,
 };
 
 /// Crate version from Cargo metadata.

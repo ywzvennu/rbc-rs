@@ -120,13 +120,31 @@ fn bench_apply_move_sequence(c: &mut Criterion) {
 
 fn bench_sense_window(c: &mut Criterion) {
     let mut group = c.benchmark_group("sense");
+    // The per-turn token is consumed by the first sense_with call,
+    // so each iteration rebuilds the game. This includes
+    // construction cost in the bench; for v0.1.0 that's an
+    // acceptable simplification.
     group.bench_function("corner", |b| {
-        let mut game = Game::new(GameConfig::default());
-        b.iter(|| black_box(&mut game).sense(Some(sq(0, 7))))
+        b.iter(|| {
+            let mut game = Game::new(GameConfig::default());
+            let action = game
+                .sense_actions()
+                .into_iter()
+                .find(|a| a.center == sq(0, 7))
+                .expect("center available");
+            game.sense_with(black_box(action)).unwrap()
+        })
     });
     group.bench_function("center", |b| {
-        let mut game = Game::new(GameConfig::default());
-        b.iter(|| black_box(&mut game).sense(Some(sq(4, 3))))
+        b.iter(|| {
+            let mut game = Game::new(GameConfig::default());
+            let action = game
+                .sense_actions()
+                .into_iter()
+                .find(|a| a.center == sq(4, 3))
+                .expect("center available");
+            game.sense_with(black_box(action)).unwrap()
+        })
     });
     group.finish();
 }
