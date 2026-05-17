@@ -66,6 +66,15 @@ impl SenseRuntime {
     fn token_mut(&mut self, id: SenseTokenId) -> Option<&mut RuntimeToken> {
         self.tokens.iter_mut().find(|t| t.id == id)
     }
+
+    fn remove_token(&mut self, id: SenseTokenId) -> bool {
+        if let Some(pos) = self.tokens.iter().position(|t| t.id == id) {
+            self.tokens.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Reconnaissance Blind Chess game state.
@@ -260,6 +269,33 @@ impl Game {
         self.sense_state[color.index()]
             .token(token)
             .map(|t| &t.shape)
+    }
+
+    /// Grants a sense token to `color` mid-game and returns its new
+    /// opaque [`SenseTokenId`].
+    ///
+    /// The token is immediately available — if granted during
+    /// `color`'s turn before they've sensed, they can `sense_with`
+    /// it on the same turn; otherwise it's available on their next
+    /// turn. IDs are monotonic per side and are never recycled,
+    /// even after a token is [`revoked`](Self::revoke_sense_token).
+    ///
+    /// Intended for server-side use cases like a token-buying
+    /// economy or admin-driven mid-game grants.
+    pub fn grant_sense_token(&mut self, color: Color, token: SenseToken) -> SenseTokenId {
+        self.sense_state[color.index()].add_token(token)
+    }
+
+    /// Revokes a previously-granted (or initial) sense token from
+    /// `color`. Returns `true` if the token existed and was removed,
+    /// `false` if the ID wasn't recognised for that side.
+    ///
+    /// Revocation is permanent — subsequent `sense_with` calls with
+    /// the same ID return [`Error::InvalidSense`]. Revoking a token
+    /// already used this turn doesn't un-use it; it just prevents
+    /// further use.
+    pub fn revoke_sense_token(&mut self, color: Color, token: SenseTokenId) -> bool {
+        self.sense_state[color.index()].remove_token(token)
     }
 
     /// Returns the square where the opponent captured a piece before this turn.

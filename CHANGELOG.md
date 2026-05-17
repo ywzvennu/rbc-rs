@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — mid-game sense token grants and revocations
+
+- `Game::grant_sense_token(color, token) -> SenseTokenId` — adds a
+  token to a side's runtime sense policy and returns its new opaque
+  ID. Useful for server-side economies where players acquire
+  additional sense capabilities mid-game.
+- `Game::revoke_sense_token(color, id) -> bool` — removes a token.
+  Returns `true` if the ID existed (whether used this turn or
+  not), `false` otherwise. Revocation is permanent; subsequent
+  `sense_with` calls with the revoked ID return
+  `Err(Error::InvalidSense)`.
+- IDs are monotonic per side: revoking does not free the ID for
+  reuse.
+- Closes #87.
+
 ### Changed — sense API refactor
 
 - **`Game::sense(center)` → `Game::sense_with(action)`**. The center is
