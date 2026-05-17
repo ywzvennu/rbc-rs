@@ -1,9 +1,8 @@
 use crate::position::Position;
 use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
-    MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, Variant, WinReason,
+    MoveStatus, Piece, PieceKind, SenseResult, SensedSquare, Square, WinReason,
 };
-use chess_startpos_rs::chess as csp;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -74,22 +73,23 @@ impl<'de> Deserialize<'de> for Game {
 }
 
 impl Game {
-    /// Creates a game from `config`. The starting position is
-    /// assembled from `config.variant`:
+    /// Creates a game from `config`.
     ///
-    /// - [`Variant::Standard`] → the FIDE starting position.
-    /// - `Rbc960` / `Rbc2880` / `RbcShuffle` (mirrored) → both ranks
-    ///   use the stored back-rank arrangement.
-    /// - `Rbc960Squared` / `Rbc2880Squared` / `RbcShuffleSquared` →
-    ///   white and black use their respective stored arrangements.
+    /// The starting back ranks are read directly from
+    /// [`GameConfig::white_backrank`] and
+    /// [`GameConfig::black_backrank`] (both default to the FIDE
+    /// standard arrangement, so `Game::new(GameConfig::default())`
+    /// produces classical chess).
     ///
-    /// Convenience constructors like
-    /// [`Game::new_rbc_960`](Self::new_rbc_960) handle the back-rank
-    /// sampling for you.
+    /// To play shuffle variants (Chess960, Chess-2880, unconstrained
+    /// shuffle, …), sample a back rank via
+    /// [`chess-startpos-rs`](https://crates.io/crates/chess-startpos-rs),
+    /// convert each piece to [`PieceKind`], and assign to the
+    /// config's back-rank fields before calling `new`.
     #[must_use]
     pub fn new(config: GameConfig) -> Self {
         let position =
-            build_starting_position(&config).expect("variant must produce a valid position");
+            build_starting_position(&config).expect("config must produce a valid position");
         Self {
             status: initial_status(&position, &config),
             position,
@@ -98,265 +98,6 @@ impl Game {
             pending_capture: [None, None],
             pending_sense: None,
         }
-    }
-
-    /// Returns a game with both sides starting from the Chess960
-    /// back rank at canonical SP-ID `sp_id` (0..=959). SP-ID 518 is
-    /// the standard FIDE starting position.
-    pub fn new_rbc_960(sp_id: u32, mut config: GameConfig) -> Result<Self, Error> {
-        let backrank = csp::chess_960()
-            .sp_id(sp_id)
-            .ok_or_else(|| invalid_variant_index("rbc_960 sp_id"))?;
-        let backrank = backrank_array(backrank)?;
-        config.variant = Variant::Rbc960 { backrank };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a game with a uniformly random Chess960 back rank
-    /// shared by both sides. Deterministic in `seed`.
-    #[must_use]
-    pub fn new_rbc_960_random(seed: u64, mut config: GameConfig) -> Self {
-        let backrank = csp::chess_960().sample(seed);
-        let backrank = backrank_array(backrank).expect("preset yields valid arrangement");
-        config.variant = Variant::Rbc960 { backrank };
-        Self::new(config)
-    }
-
-    /// Returns a game with both sides starting from the explicit
-    /// Chess960 back-rank arrangement. Fails if the arrangement
-    /// isn't a valid Chess960 starting position (wrong piece set,
-    /// bishops on same colour, or king not strictly between rooks).
-    pub fn new_rbc_960_from_backrank(
-        backrank: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        if csp::chess_960().sp_id_of(&backrank).is_none() {
-            return Err(invalid_variant_index("rbc_960 backrank"));
-        }
-        config.variant = Variant::Rbc960 { backrank };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a game where white and black draw Chess960 back ranks
-    /// independently at the given SP-IDs.
-    pub fn new_rbc_960_squared(
-        white_sp_id: u32,
-        black_sp_id: u32,
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::chess_960();
-        let white = problem
-            .sp_id(white_sp_id)
-            .ok_or_else(|| invalid_variant_index("rbc_960 white_sp_id"))?;
-        let black = problem
-            .sp_id(black_sp_id)
-            .ok_or_else(|| invalid_variant_index("rbc_960 black_sp_id"))?;
-        config.variant = Variant::Rbc960Squared {
-            white: backrank_array(white)?,
-            black: backrank_array(black)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess960² game with both sides' arrangements drawn
-    /// independently from `seed`.
-    #[must_use]
-    pub fn new_rbc_960_squared_random(seed: u64, mut config: GameConfig) -> Self {
-        let problem = csp::chess_960();
-        // Two distinct seeds derived from `seed` so the two draws
-        // aren't correlated.
-        let white = problem.sample(seed);
-        let black = problem.sample(seed.wrapping_add(0x9E37_79B9_7F4A_7C15));
-        config.variant = Variant::Rbc960Squared {
-            white: backrank_array(white).expect("preset yields valid arrangement"),
-            black: backrank_array(black).expect("preset yields valid arrangement"),
-        };
-        Self::new(config)
-    }
-
-    /// Returns a Chess960² game from explicit back-rank arrangements.
-    pub fn new_rbc_960_squared_from_backranks(
-        white: [csp::Piece; 8],
-        black: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::chess_960();
-        if problem.sp_id_of(&white).is_none() {
-            return Err(invalid_variant_index("rbc_960 white backrank"));
-        }
-        if problem.sp_id_of(&black).is_none() {
-            return Err(invalid_variant_index("rbc_960 black backrank"));
-        }
-        config.variant = Variant::Rbc960Squared { white, black };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a game using the Chess-2880 back rank at lexicographic
-    /// index `index` (0..2880).
-    pub fn new_rbc_2880(index: u64, mut config: GameConfig) -> Result<Self, Error> {
-        let problem = csp::chess_2880();
-        let backrank = problem
-            .at(index)
-            .ok_or_else(|| invalid_variant_index("rbc_2880 index"))?;
-        config.variant = Variant::Rbc2880 {
-            backrank: backrank_array(backrank)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess-2880 game with a uniformly-random back rank.
-    pub fn new_rbc_2880_random(seed: u64, mut config: GameConfig) -> Result<Self, Error> {
-        let backrank = csp::chess_2880()
-            .sample(seed)
-            .ok_or_else(|| invalid_variant_index("rbc_2880 sample"))?;
-        config.variant = Variant::Rbc2880 {
-            backrank: backrank_array(backrank)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess-2880 game from an explicit back-rank arrangement.
-    pub fn new_rbc_2880_from_backrank(
-        backrank: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        validate_against_problem(&backrank, &csp::chess_2880(), "rbc_2880 backrank")?;
-        config.variant = Variant::Rbc2880 { backrank };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess-2880² game with independent draws by index.
-    pub fn new_rbc_2880_squared(
-        white_index: u64,
-        black_index: u64,
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::chess_2880();
-        let white = problem
-            .at(white_index)
-            .ok_or_else(|| invalid_variant_index("rbc_2880 white_index"))?;
-        let black = problem
-            .at(black_index)
-            .ok_or_else(|| invalid_variant_index("rbc_2880 black_index"))?;
-        config.variant = Variant::Rbc2880Squared {
-            white: backrank_array(white)?,
-            black: backrank_array(black)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess-2880² game with random independent draws.
-    pub fn new_rbc_2880_squared_random(seed: u64, mut config: GameConfig) -> Result<Self, Error> {
-        let problem = csp::chess_2880();
-        let white = problem
-            .sample(seed)
-            .ok_or_else(|| invalid_variant_index("rbc_2880 white sample"))?;
-        let black = problem
-            .sample(seed.wrapping_add(0x9E37_79B9_7F4A_7C15))
-            .ok_or_else(|| invalid_variant_index("rbc_2880 black sample"))?;
-        config.variant = Variant::Rbc2880Squared {
-            white: backrank_array(white)?,
-            black: backrank_array(black)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a Chess-2880² game from explicit arrangements.
-    pub fn new_rbc_2880_squared_from_backranks(
-        white: [csp::Piece; 8],
-        black: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::chess_2880();
-        validate_against_problem(&white, &problem, "rbc_2880 white backrank")?;
-        validate_against_problem(&black, &problem, "rbc_2880 black backrank")?;
-        config.variant = Variant::Rbc2880Squared { white, black };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a game using the unconstrained-shuffle back rank at
-    /// lexicographic index `index` (0..5040).
-    pub fn new_rbc_shuffle(index: u64, mut config: GameConfig) -> Result<Self, Error> {
-        let backrank = csp::shuffle()
-            .at(index)
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle index"))?;
-        config.variant = Variant::RbcShuffle {
-            backrank: backrank_array(backrank)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a shuffle game with a random back rank.
-    pub fn new_rbc_shuffle_random(seed: u64, mut config: GameConfig) -> Result<Self, Error> {
-        let backrank = csp::shuffle()
-            .sample(seed)
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle sample"))?;
-        config.variant = Variant::RbcShuffle {
-            backrank: backrank_array(backrank)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a shuffle game from an explicit arrangement.
-    pub fn new_rbc_shuffle_from_backrank(
-        backrank: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        validate_against_problem(&backrank, &csp::shuffle(), "rbc_shuffle backrank")?;
-        config.variant = Variant::RbcShuffle { backrank };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a shuffle² game with independent draws by index.
-    pub fn new_rbc_shuffle_squared(
-        white_index: u64,
-        black_index: u64,
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::shuffle();
-        let white = problem
-            .at(white_index)
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle white_index"))?;
-        let black = problem
-            .at(black_index)
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle black_index"))?;
-        config.variant = Variant::RbcShuffleSquared {
-            white: backrank_array(white)?,
-            black: backrank_array(black)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a shuffle² game with random independent draws.
-    pub fn new_rbc_shuffle_squared_random(
-        seed: u64,
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::shuffle();
-        let white = problem
-            .sample(seed)
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle white sample"))?;
-        let black = problem
-            .sample(seed.wrapping_add(0x9E37_79B9_7F4A_7C15))
-            .ok_or_else(|| invalid_variant_index("rbc_shuffle black sample"))?;
-        config.variant = Variant::RbcShuffleSquared {
-            white: backrank_array(white)?,
-            black: backrank_array(black)?,
-        };
-        Ok(Self::new(config))
-    }
-
-    /// Returns a shuffle² game from explicit arrangements.
-    pub fn new_rbc_shuffle_squared_from_backranks(
-        white: [csp::Piece; 8],
-        black: [csp::Piece; 8],
-        mut config: GameConfig,
-    ) -> Result<Self, Error> {
-        let problem = csp::shuffle();
-        validate_against_problem(&white, &problem, "rbc_shuffle white backrank")?;
-        validate_against_problem(&black, &problem, "rbc_shuffle black backrank")?;
-        config.variant = Variant::RbcShuffleSquared { white, black };
-        Ok(Self::new(config))
     }
 
     /// Creates a game from a FEN string.
@@ -1335,69 +1076,14 @@ fn initial_status(position: &Position, config: &GameConfig) -> GameStatus {
     }
 }
 
-/// Maps a `chess_startpos_rs::chess::Piece` to the matching rbc-rs
-/// `PieceKind`.
-fn csp_piece_to_kind(p: csp::Piece) -> PieceKind {
-    match p {
-        csp::Piece::King => PieceKind::King,
-        csp::Piece::Queen => PieceKind::Queen,
-        csp::Piece::Rook => PieceKind::Rook,
-        csp::Piece::Bishop => PieceKind::Bishop,
-        csp::Piece::Knight => PieceKind::Knight,
-    }
-}
-
-/// Converts a sampled `Vec<csp::Piece>` (length 8) into the fixed-size
-/// `[csp::Piece; 8]` we store in `Variant`.
-fn backrank_array(arrangement: Vec<csp::Piece>) -> Result<[csp::Piece; 8], Error> {
-    arrangement
-        .try_into()
-        .map_err(|_| invalid_variant_index("back-rank length must be 8"))
-}
-
-/// Helper for the `_from_backrank(s)` constructors: checks the
-/// arrangement satisfies the given problem's constraints.
-fn validate_against_problem(
-    backrank: &[csp::Piece; 8],
-    problem: &chess_startpos_rs::Problem<csp::Piece>,
-    context: &'static str,
-) -> Result<(), Error> {
-    let satisfies = problem
-        .constraint
-        .evaluate(backrank.as_slice(), &problem.square_colors);
-    if !satisfies {
-        return Err(invalid_variant_index(context));
-    }
-    Ok(())
-}
-
-fn invalid_variant_index(context: &'static str) -> Error {
-    Error::InvalidFen(format!("invalid variant input: {context}"))
-}
-
-/// Builds the starting [`Position`] for a `GameConfig` by dispatching
-/// on `config.variant`.
+/// Builds the starting [`Position`] from `config.white_backrank` and
+/// `config.black_backrank`, intersected with `config.castling_policy`.
 fn build_starting_position(config: &GameConfig) -> Result<Position, Error> {
-    let (white_arr, black_arr) = match &config.variant {
-        Variant::Standard => return Ok(Position::standard()),
-        Variant::Rbc960 { backrank }
-        | Variant::Rbc2880 { backrank }
-        | Variant::RbcShuffle { backrank } => (backrank, backrank),
-        Variant::Rbc960Squared { white, black }
-        | Variant::Rbc2880Squared { white, black }
-        | Variant::RbcShuffleSquared { white, black } => (white, black),
-    };
-    let white_kinds = backrank_to_kinds(white_arr);
-    let black_kinds = backrank_to_kinds(black_arr);
-    Position::from_starting_backranks(&white_kinds, &black_kinds, &config.castling_policy)
-}
-
-fn backrank_to_kinds(backrank: &[csp::Piece; 8]) -> [PieceKind; 8] {
-    let mut out = [PieceKind::King; 8];
-    for (i, &p) in backrank.iter().enumerate() {
-        out[i] = csp_piece_to_kind(p);
-    }
-    out
+    Position::from_starting_backranks(
+        &config.white_backrank,
+        &config.black_backrank,
+        &config.castling_policy,
+    )
 }
 
 #[cfg(test)]

@@ -48,7 +48,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c8a89847e9dbdbe4a079d3086e3dd8f2660b03f0b6a4181bd30d3ab6004ce6e"
 dependencies = [
  "fastrand",
- "serde",
 ]
 
 [[package]]

@@ -184,78 +184,38 @@ pub struct Move {
     pub promotion: Option<PieceKind>,
 }
 
-/// Starting-position variant for the game.
+/// The FIDE standard back-rank arrangement (`RNBQKBNR`, file a..h).
 ///
-/// `Standard` (the default) preserves classical FIDE chess. The
-/// shuffle variants store the **already-sampled** back-rank
-/// arrangement:
+/// Used as the default value for [`GameConfig::white_backrank`] and
+/// [`GameConfig::black_backrank`].
+pub const STANDARD_BACK_RANK: [PieceKind; 8] = [
+    PieceKind::Rook,
+    PieceKind::Knight,
+    PieceKind::Bishop,
+    PieceKind::Queen,
+    PieceKind::King,
+    PieceKind::Bishop,
+    PieceKind::Knight,
+    PieceKind::Rook,
+];
+
+/// Per-side, per-direction castling-right toggles applied at game
+/// start.
 ///
-/// - `Rbc960` / `Rbc2880` / `RbcShuffle` — mirrored: both sides
-///   start with the same back-rank arrangement (FIDE convention).
-/// - `Rbc960Squared` / `Rbc2880Squared` / `RbcShuffleSquared` —
-///   white and black draw arrangements independently. RBC-flavoured;
-///   removes the ability to infer the opponent's setup from your own.
+/// Intersected with the structural castling rights derived from the
+/// chosen back-rank arrangement: a side that doesn't have a rook on
+/// the relevant flank cannot castle that way regardless of policy.
+/// A side that *does* have a rook can have its right revoked at
+/// game-start by setting the corresponding toggle to `false`.
 ///
-/// Convenience constructors on [`Game`](crate::Game) handle sampling
-/// from [`chess_startpos_rs`] under the hood and produce these
-/// `Variant` values for you (see e.g. `Game::new_rbc_960`).
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-#[non_exhaustive]
-pub enum Variant {
-    /// Classical FIDE chess starting position. Default.
-    #[default]
-    Standard,
-
-    /// Chess960 — both sides use the given back rank. Bishops on
-    /// opposite-colour squares; king strictly between the rooks.
-    Rbc960 {
-        /// The 8-piece back-rank arrangement, file a..h.
-        backrank: [chess_startpos_rs::chess::Piece; 8],
-    },
-    /// Chess960² — white and black draw arrangements independently.
-    Rbc960Squared {
-        /// White's back rank (rank 1).
-        white: [chess_startpos_rs::chess::Piece; 8],
-        /// Black's back rank (rank 8).
-        black: [chess_startpos_rs::chess::Piece; 8],
-    },
-
-    /// Chess2880 — both sides use the given back rank. Bishops on
-    /// opposite-colour squares (no king-between-rooks constraint).
-    Rbc2880 {
-        /// The 8-piece back-rank arrangement.
-        backrank: [chess_startpos_rs::chess::Piece; 8],
-    },
-    /// Chess2880² — independent draws per side.
-    Rbc2880Squared {
-        /// White's back rank.
-        white: [chess_startpos_rs::chess::Piece; 8],
-        /// Black's back rank.
-        black: [chess_startpos_rs::chess::Piece; 8],
-    },
-
-    /// Unconstrained shuffle of the KQRRBBNN back rank (5040
-    /// positions). Both sides use the given back rank.
-    RbcShuffle {
-        /// The 8-piece back-rank arrangement.
-        backrank: [chess_startpos_rs::chess::Piece; 8],
-    },
-    /// Unconstrained shuffle, squared. Independent draws per side.
-    RbcShuffleSquared {
-        /// White's back rank.
-        white: [chess_startpos_rs::chess::Piece; 8],
-        /// Black's back rank.
-        black: [chess_startpos_rs::chess::Piece; 8],
-    },
-}
-
-/// Per-side, per-direction castling-right toggles.
+/// The primary use case is variants that disallow castling
+/// entirely (e.g. an "RBC no-castling" mode): set all four toggles
+/// to `false`.
 ///
-/// Applied as an intersection with the structural castling rights
-/// derived from the chosen back-rank arrangement: a side that
-/// doesn't have a rook on the relevant flank cannot castle that way
-/// regardless of policy.
+/// Once a game has started, runtime castling rights evolve from
+/// these initial values per normal chess rules (king moves, rook
+/// moves, rook captures clear the corresponding right). This struct
+/// only controls the *starting* rights.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct CastlingPolicy {
@@ -283,8 +243,20 @@ impl Default for CastlingPolicy {
 /// Static game configuration.
 ///
 /// Marked `#[non_exhaustive]` so future fields can be added without a
-/// semver break — construct via [`Default::default`] and spread or
-/// mutate as needed.
+/// semver break — construct via [`Default::default`] and mutate as
+/// needed.
+///
+/// The starting back ranks default to the FIDE standard
+/// arrangement. Set [`white_backrank`](Self::white_backrank) and
+/// [`black_backrank`](Self::black_backrank) to any 8-piece
+/// arrangement for shuffle variants — passing them the same array
+/// produces FIDE-style mirrored play; passing different arrays
+/// produces "squared" play where each side has its own setup.
+///
+/// Use [`chess-startpos-rs`](https://crates.io/crates/chess-startpos-rs)
+/// to sample valid Chess960 / Chess-2880 / shuffle arrangements;
+/// convert from `chess_startpos_rs::chess::Piece` to
+/// [`PieceKind`](crate::PieceKind) at the boundary.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -293,11 +265,14 @@ pub struct GameConfig {
     pub reversible_moves_limit: Option<u16>,
     /// Maximum full turns before a draw.
     pub full_turn_limit: Option<u16>,
-    /// Starting-position variant. Defaults to [`Variant::Standard`].
-    pub variant: Variant,
-    /// Per-side, per-direction castling-right toggles, intersected
-    /// with the structural rights derived from the chosen back rank.
-    /// Defaults to all four directions allowed.
+    /// White's rank-1 starting arrangement (file a..h). Defaults to
+    /// the FIDE standard [`STANDARD_BACK_RANK`].
+    pub white_backrank: [PieceKind; 8],
+    /// Black's rank-8 starting arrangement (file a..h). Defaults to
+    /// the FIDE standard [`STANDARD_BACK_RANK`].
+    pub black_backrank: [PieceKind; 8],
+    /// Per-side, per-direction castling-right toggles applied at
+    /// game start. See [`CastlingPolicy`].
     pub castling_policy: CastlingPolicy,
 }
 
@@ -306,7 +281,8 @@ impl Default for GameConfig {
         Self {
             reversible_moves_limit: Some(100),
             full_turn_limit: None,
-            variant: Variant::default(),
+            white_backrank: STANDARD_BACK_RANK,
+            black_backrank: STANDARD_BACK_RANK,
             castling_policy: CastlingPolicy::default(),
         }
     }

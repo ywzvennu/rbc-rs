@@ -1,7 +1,5 @@
 use crate::types::{CastlingPolicy, Color, Error, Piece, PieceKind, Square};
 
-const STANDARD_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
 /// Castling rights stored per side, per direction.
 ///
 /// `Some(file)` records the file of the rook that would participate
@@ -43,10 +41,6 @@ pub(crate) struct Position {
 }
 
 impl Position {
-    pub(crate) fn standard() -> Self {
-        Self::from_fen(STANDARD_FEN).expect("standard starting FEN is valid")
-    }
-
     /// Assembles a starting [`Position`] from white's and black's
     /// back-rank arrangements.
     ///
@@ -715,7 +709,8 @@ mod tests {
 
     #[test]
     fn standard_position_round_trips_as_fen() {
-        let position = Position::standard();
+        let position =
+            Position::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
         assert_eq!(
             position.to_fen(),
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
