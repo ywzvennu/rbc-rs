@@ -162,6 +162,16 @@ impl Game {
     }
 
     /// Performs a sense action.
+    ///
+    /// The set of squares revealed is determined by the current
+    /// player's configured [`crate::SenseShape`]
+    /// ([`GameConfig::white_sense_shape`] or
+    /// [`GameConfig::black_sense_shape`]). Shapes are clipped to
+    /// the board — offsets that fall outside files / ranks `0..=7`
+    /// are dropped.
+    ///
+    /// Passing `None` is a no-op pass: returns an empty
+    /// `SenseResult`.
     #[must_use]
     pub fn sense(&mut self, center: Option<Square>) -> SenseResult {
         let Some(center) = center else {
@@ -173,21 +183,25 @@ impl Game {
             return result;
         };
 
-        let mut squares = Vec::with_capacity(9);
-        let rank = center.rank() as i8;
-        let file = center.file() as i8;
-        for delta_rank in [1, 0, -1] {
-            for delta_file in [-1, 0, 1] {
-                let next_rank = rank + delta_rank;
-                let next_file = file + delta_file;
-                if (0..=7).contains(&next_rank) && (0..=7).contains(&next_file) {
-                    let square =
-                        Square::from_coords(next_file as u8, next_rank as u8).expect("in bounds");
-                    squares.push(SensedSquare {
-                        square,
-                        piece: self.piece_at(square),
-                    });
-                }
+        let shape = match self.turn() {
+            Some(Color::White) => &self.config.white_sense_shape,
+            Some(Color::Black) => &self.config.black_sense_shape,
+            None => &self.config.white_sense_shape, // game over; shape unused
+        };
+
+        let mut squares = Vec::with_capacity(shape.offsets.len());
+        let center_file = center.file() as i8;
+        let center_rank = center.rank() as i8;
+        for &(dx, dy) in &shape.offsets {
+            let next_file = center_file + dx;
+            let next_rank = center_rank + dy;
+            if (0..=7).contains(&next_file) && (0..=7).contains(&next_rank) {
+                let square =
+                    Square::from_coords(next_file as u8, next_rank as u8).expect("in bounds");
+                squares.push(SensedSquare {
+                    square,
+                    piece: self.piece_at(square),
+                });
             }
         }
 

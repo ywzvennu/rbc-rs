@@ -71,8 +71,8 @@ mod game;
 pub use game::Game;
 pub use types::{
     Capture, CastlingPolicy, Color, DrawReason, Error, GameConfig, GameResult, GameStatus,
-    HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseResult, SensedSquare,
-    Square, WinReason, STANDARD_BACK_RANK,
+    HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseResult, SenseShape,
+    SensedSquare, Square, WinReason, STANDARD_BACK_RANK,
 };
 
 /// Crate version from Cargo metadata.

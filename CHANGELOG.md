@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `SenseShape` type and `white_sense_shape` / `black_sense_shape`
+  fields on `GameConfig`. Default is `SenseShape::window(1)` — the
+  standard 3×3 RBC window — so existing behaviour is preserved.
+  Variants can use:
+  - `SenseShape::window(half_width)` — square window
+  - `SenseShape::rectangle(half_w, half_h)` — rectangle
+  - `SenseShape::cross(arm)` — plus shape
+  - `SenseShape::point()` — single square
+  - `SenseShape::full_board()` — all 64 squares
+  - `SenseShape::empty()` — zero squares
+  - `SenseShape::custom(offsets)` — arbitrary `(dx, dy)` offsets
+- Per-side configuration: `white_sense_shape` and `black_sense_shape`
+  can differ for asymmetric / handicap variants.
+- Closes #85; tracker #82 (multi-token budgets and mid-game grants
+  remain open as #86 / #87).
+
 ### Changed (pre-v0.1.0 simplification)
 
 - **Removed `Variant` enum from the public API.** The family label
