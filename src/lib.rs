@@ -28,7 +28,10 @@
 //!     .into_iter()
 //!     .find(|a| a.center == center)
 //!     .expect("center available");
-//! let sense_result = game.sense_with(action).expect("valid action");
+//! let sense_result = game
+//!     .sense_with(action)
+//!     .expect("valid action")
+//!     .expect("default token is immediate-reveal");
 //! assert_eq!(sense_result.squares.len(), 9);
 //!
 //! // Generate the candidate move requests for the acting player.
@@ -77,8 +80,8 @@ pub use game::Game;
 pub use types::{
     Capture, CastlingPolicy, Color, DrawReason, Error, GameConfig, GameResult, GameStatus,
     HistoryEntry, Move, MoveOutcome, MoveStatus, Piece, PieceKind, SenseAction, SenseObservation,
-    SensePolicy, SenseResult, SenseShape, SenseToken, SenseTokenId, SenseVisibility, SensedSquare,
-    Square, WinReason, STANDARD_BACK_RANK,
+    SensePolicy, SenseResult, SenseRevealMode, SenseShape, SenseToken, SenseTokenId,
+    SenseVisibility, SensedSquare, Square, WinReason, STANDARD_BACK_RANK,
 };
 
 /// Crate version from Cargo metadata.

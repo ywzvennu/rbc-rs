@@ -18,7 +18,9 @@ fn sense_at(game: &mut Game, center: Square) -> rbc_rs::SenseResult {
         .into_iter()
         .find(|a| a.center == center)
         .expect("center available");
-    game.sense_with(action).expect("valid action")
+    game.sense_with(action)
+        .expect("valid action")
+        .expect("default token is immediate-reveal")
 }
 
 fn main() {

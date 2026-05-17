@@ -1,8 +1,8 @@
 use crate::position::Position;
 use crate::types::{
     Capture, Color, Error, GameConfig, GameResult, GameStatus, HistoryEntry, Move, MoveOutcome,
-    MoveStatus, Piece, PieceKind, SenseAction, SensePolicy, SenseResult, SenseShape, SenseToken,
-    SenseTokenId, SenseVisibility, SensedSquare, Square, WinReason,
+    MoveStatus, Piece, PieceKind, SenseAction, SensePolicy, SenseResult, SenseRevealMode,
+    SenseShape, SenseToken, SenseTokenId, SenseVisibility, SensedSquare, Square, WinReason,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,6 +28,7 @@ struct RuntimeToken {
     id: SenseTokenId,
     shape: SenseShape,
     visibility: SenseVisibility,
+    reveal_mode: SenseRevealMode,
     used_this_turn: bool,
 }
 
@@ -50,6 +51,7 @@ impl SenseRuntime {
             id,
             shape: token.shape,
             visibility: token.visibility,
+            reveal_mode: token.reveal_mode,
             used_this_turn: false,
         });
         id
@@ -88,9 +90,15 @@ pub struct Game {
     history: Vec<HistoryEntry>,
     pending_capture: [Option<Square>; 2],
     /// Sense results performed during the current player's sense
-    /// phase. Drained into `HistoryEntry.senses` at `apply_move` and
-    /// cleared.
+    /// phase, already visible to the senser (immediate-mode results
+    /// plus any deferred results that have been revealed). Drained
+    /// into `HistoryEntry.senses` at `apply_move`.
     pending_senses: Vec<SenseResult>,
+    /// Deferred-mode sense results performed during the current
+    /// player's sense phase, not yet revealed to the senser. Drained
+    /// into `pending_senses` by `reveal_senses` and implicitly by
+    /// `apply_move`.
+    deferred_senses: Vec<SenseResult>,
     sense_state: [SenseRuntime; 2],
 }
 
@@ -103,6 +111,8 @@ struct SerializedGame {
     history: Vec<HistoryEntry>,
     pending_capture: [Option<Square>; 2],
     pending_senses: Vec<SenseResult>,
+    #[serde(default)]
+    deferred_senses: Vec<SenseResult>,
 }
 
 #[cfg(feature = "serde")]
@@ -118,6 +128,7 @@ impl Serialize for Game {
             history: self.history.clone(),
             pending_capture: self.pending_capture,
             pending_senses: self.pending_senses.clone(),
+            deferred_senses: self.deferred_senses.clone(),
         }
         .serialize(serializer)
     }
@@ -142,6 +153,7 @@ impl<'de> Deserialize<'de> for Game {
             history: serialized.history,
             pending_capture: serialized.pending_capture,
             pending_senses: serialized.pending_senses,
+            deferred_senses: serialized.deferred_senses,
             sense_state,
         })
     }
@@ -176,6 +188,7 @@ impl Game {
             history: Vec::new(),
             pending_capture: [None, None],
             pending_senses: Vec::new(),
+            deferred_senses: Vec::new(),
             sense_state,
         }
     }
@@ -194,6 +207,7 @@ impl Game {
             history: Vec::new(),
             pending_capture: [None, None],
             pending_senses: Vec::new(),
+            deferred_senses: Vec::new(),
             sense_state,
         })
     }
@@ -315,15 +329,26 @@ impl Game {
     /// the one configured on that token in
     /// [`GameConfig::white_sense_policy`] or
     /// [`GameConfig::black_sense_policy`]. On success, marks the
-    /// token used for the turn, records the [`SenseResult`] for
-    /// inclusion in the next [`HistoryEntry`], and returns the
-    /// revealed squares.
+    /// token used for the turn and records the [`SenseResult`] for
+    /// inclusion in the next [`HistoryEntry`].
+    ///
+    /// The return type depends on the token's
+    /// [`SenseRevealMode`]:
+    /// - [`Immediate`](SenseRevealMode::Immediate) (default):
+    ///   returns `Ok(Some(result))` — the result is visible to the
+    ///   senser right away and can inform their next sense or move.
+    /// - [`Deferred`](SenseRevealMode::Deferred): returns
+    ///   `Ok(None)`. The result is buffered; call
+    ///   [`reveal_senses`](Self::reveal_senses) (or rely on the
+    ///   implicit reveal at [`apply_move`](Self::apply_move)) to
+    ///   see it. Useful for non-adaptive sensing where the senser
+    ///   must commit all senses before seeing any.
     ///
     /// Passing on sense is **not** a `sense_with` call — the player
     /// simply calls [`apply_move`](Self::apply_move) without first
     /// calling `sense_with`, and the resulting history entry has an
     /// empty `senses` vector.
-    pub fn sense_with(&mut self, action: SenseAction) -> Result<SenseResult, Error> {
+    pub fn sense_with(&mut self, action: SenseAction) -> Result<Option<SenseResult>, Error> {
         let Some(turn) = self.turn() else {
             return Err(Error::InvalidSense);
         };
@@ -334,6 +359,7 @@ impl Game {
         }
         let shape = token.shape.clone();
         let visibility = token.visibility;
+        let reveal_mode = token.reveal_mode;
         token.used_this_turn = true;
 
         let mut squares = Vec::with_capacity(shape.offsets.len());
@@ -358,8 +384,35 @@ impl Game {
             visibility,
             shape,
         };
-        self.pending_senses.push(result.clone());
-        Ok(result)
+        match reveal_mode {
+            SenseRevealMode::Immediate => {
+                self.pending_senses.push(result.clone());
+                Ok(Some(result))
+            }
+            SenseRevealMode::Deferred => {
+                self.deferred_senses.push(result);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Reveals all [`SenseRevealMode::Deferred`] sense results
+    /// buffered this turn and returns them, in the order they were
+    /// performed. Subsequent calls return an empty `Vec` until more
+    /// deferred senses are buffered.
+    ///
+    /// Once revealed, the results are also accessible via the
+    /// senser's view of the upcoming [`HistoryEntry`]; they're now
+    /// available to inform this turn's move choice.
+    ///
+    /// If the player calls [`apply_move`](Self::apply_move) without
+    /// first calling `reveal_senses`, any buffered deferred results
+    /// are still recorded in history — they just weren't visible in
+    /// time to influence the move.
+    pub fn reveal_senses(&mut self) -> Vec<SenseResult> {
+        let revealed = std::mem::take(&mut self.deferred_senses);
+        self.pending_senses.extend(revealed.iter().cloned());
+        revealed
     }
 
     /// Returns the piece at a square.
@@ -1080,6 +1133,11 @@ impl Game {
     }
 
     fn record_history(&mut self, color: Color, move_outcome: MoveOutcome, fen_before_move: String) {
+        // Auto-reveal any deferred senses the player forgot to
+        // commit explicitly so they still land in history (the
+        // senser just didn't see them in time to inform this move).
+        let deferred = std::mem::take(&mut self.deferred_senses);
+        self.pending_senses.extend(deferred);
         let senses = std::mem::take(&mut self.pending_senses);
         self.history.push(HistoryEntry {
             color,
@@ -1280,7 +1338,9 @@ mod tests {
             .into_iter()
             .find(|a| a.center == center)
             .expect("center available among actions");
-        game.sense_with(action).expect("valid sense action")
+        game.sense_with(action)
+            .expect("valid sense action")
+            .expect("default token is immediate-reveal")
     }
 
     #[test]

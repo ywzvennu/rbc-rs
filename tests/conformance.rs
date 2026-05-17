@@ -23,6 +23,7 @@ fn sense_at(game: &mut Game, center: Square) -> Vec<Square> {
         .expect("center available");
     game.sense_with(action)
         .expect("valid action")
+        .expect("default token is immediate-reveal")
         .squares
         .into_iter()
         .map(|entry| entry.square)
