@@ -43,9 +43,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chess-startpos-rs"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c8a89847e9dbdbe4a079d3086e3dd8f2660b03f0b6a4181bd30d3ab6004ce6e"
+checksum = "4694378bf91cc00271d7a9413b0896ad171f21880ce775730f27d84d220f3105"
 dependencies = [
  "fastrand",
 ]
